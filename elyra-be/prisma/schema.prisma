@@ -10,3 +10,126 @@ model test {
   id   String @id @default(cuid())
   name String
 }
+
+model User {
+  id                 String             @id @default(cuid())
+  clerkId            String             @unique
+
+  // Basic info
+  name               String
+  age                Int
+  gender             String
+  bio                String?
+  location           String
+  latitude           Float?
+  longitude          Float?
+
+  // Profile photos (array of URLs from Supabase Storage)
+  profilePhotos      String[]           @default([])
+  primaryPhotoUrl    String?
+
+  // Verification
+  verificationSelfieUrl  String?
+  verificationStatus     VerificationStatus @default(UNVERIFIED)
+  verificationNote       String?          // reason if rejected
+  verifiedAt             DateTime?
+
+  // Matching data
+  interests          String[]           @default([])
+  personalityAnswers Json               @default("{}")
+  preferences        Json               @default("{}")
+  embedding          Unsupported("vector(1536)")?
+
+  // Account status
+  isActive           Boolean            @default(true)
+  isOnboarded        Boolean            @default(false)
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  matchesAsUser1     Match[]            @relation("User1Matches")
+  matchesAsUser2     Match[]            @relation("User2Matches")
+  feedbacks          Feedback[]
+  verificationLogs   VerificationLog[]
+
+  @@map("users")
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model VerificationLog {
+  id            String   @id @default(cuid())
+  userId        String
+  selfieUrl     String
+  aiCheckPassed Boolean?
+  aiReason      String?
+  reviewedBy    String?  // "ai" or "admin"
+  status        VerificationStatus
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("verification_logs")
+}
+
+model Match {
+  id                 String      @id @default(cuid())
+  user1Id            String
+  user2Id            String
+  compatibilityScore Float
+  status             MatchStatus @default(PENDING)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  user1      User       @relation("User1Matches", fields: [user1Id], references: [id])
+  user2      User       @relation("User2Matches", fields: [user2Id], references: [id])
+  datePlan   DatePlan?
+  feedbacks  Feedback[]
+
+  @@map("matches")
+}
+
+enum MatchStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  REJECTED
+}
+
+model DatePlan {
+  id          String   @id @default(cuid())
+  matchId     String   @unique
+  activities  Json
+  totalBudget String
+  duration    String
+  vibe        String
+  location    String
+  generatedAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+
+  @@map("date_plans")
+}
+
+model Feedback {
+  id             String   @id @default(cuid())
+  matchId        String
+  userId         String
+  rating         Int
+  comfort        Int
+  enjoyment      Int
+  wouldMeetAgain Boolean
+  review         String?
+  successScore   Float?
+  createdAt      DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@map("feedbacks")
+}
