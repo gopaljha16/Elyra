@@ -8,7 +8,13 @@ export type Profile = {
   bio?: string;
   interests: string[];
   personalityAnswers: { weekend: string; connection: string; spontaneity: string };
-  preferences: { minAge: number; maxAge: number; gender: string; maxDistance: number; relationship: string };
+  preferences: {
+    minAge: number;
+    maxAge: number;
+    gender: string;
+    maxDistance: number;
+    relationship: string;
+  };
 };
 
 export type PhotoStatus = {
@@ -31,7 +37,12 @@ export type Attempt = {
 };
 
 export class RequestError extends Error {
-  constructor(message: string, public status: number, public remaining?: number, public retryAfter?: number) {
+  constructor(
+    message: string,
+    public status: number,
+    public remaining?: number,
+    public retryAfter?: number,
+  ) {
     super(message);
   }
 }
@@ -42,14 +53,23 @@ export async function onboardingRequest(path: string, token: string | null, init
   headers.set("Authorization", `Bearer ${token}`);
   let result: Response;
   try {
-    result = await fetch(`${endpoint.replace(/\/$/, "")}/api/onboarding${path}`, { ...init, headers, cache: "no-store" });
+    result = await fetch(`${endpoint.replace(/\/$/, "")}/api/onboarding${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
   } catch (error) {
     if (init?.signal?.aborted) throw error;
     throw new RequestError("Could not connect to Elyra. Check your connection and try again.", 503);
   }
   if (!result.ok) {
     const data = await result.json().catch(() => null);
-    throw new RequestError(data?.error ?? "Something went wrong. Try again.", result.status, data?.remaining, data?.retryAfter);
+    throw new RequestError(
+      data?.error ?? "Something went wrong. Try again.",
+      result.status,
+      data?.remaining,
+      data?.retryAfter,
+    );
   }
   return result;
 }

@@ -19,9 +19,7 @@ import { datingRoutes } from "./dating/routes.js";
 import { liveRoutes } from "./dating/live.js";
 
 const envSchema = z.object({
-  NODE_ENV: z
-    .enum(["development", "test", "production"])
-    .default("development"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(5000),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
   CLERK_PUBLISHABLE_KEY: z.string().min(1),
@@ -31,7 +29,10 @@ const envSchema = z.object({
   SUPABASE_SERVICE_KEY: z.string().min(1),
   SUPABASE_BUCKET: z.string().min(1).default("elyra-onboarding"),
   GEMINI_API_KEY: z.string().min(1),
-  GEMINI_MODEL: z.string().regex(/^[a-z0-9.-]+$/).default("gemini-3.5-flash-lite"),
+  GEMINI_MODEL: z
+    .string()
+    .regex(/^[a-z0-9.-]+$/)
+    .default("gemini-3.5-flash-lite"),
   VERIFICATION_ADMIN_IDS: z.string().default(""),
   TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
@@ -52,7 +53,9 @@ try {
   throw error;
 }
 const app = express();
-const trustedProxies = env.TRUSTED_PROXIES.split(",").map((value) => value.trim()).filter(Boolean);
+const trustedProxies = env.TRUSTED_PROXIES.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 if (trustedProxies.length) app.set("trust proxy", trustedProxies);
 
 app.use(
@@ -68,12 +71,17 @@ app.use(express.json({ limit: "1mb" }));
 app.use(clerkMiddleware({ authorizedParties: [env.FRONTEND_URL] }));
 const db = createDatabase(env.DATABASE_URL);
 const storage = createStorage(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, env.SUPABASE_BUCKET);
-app.use("/api/onboarding", verificationRoutes(db, storage, {
-  geminiKey: env.GEMINI_API_KEY,
-  geminiModel: env.GEMINI_MODEL,
-  ipHashKey: env.SUPABASE_SERVICE_KEY,
-  adminIds: env.VERIFICATION_ADMIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
-}));
+app.use(
+  "/api/onboarding",
+  verificationRoutes(db, storage, {
+    geminiKey: env.GEMINI_API_KEY,
+    geminiModel: env.GEMINI_MODEL,
+    ipHashKey: env.SUPABASE_SERVICE_KEY,
+    adminIds: env.VERIFICATION_ADMIN_IDS.split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  }),
+);
 app.use("/api/onboarding", onboardingRoutes(db, storage));
 app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY));
 app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
@@ -185,37 +193,31 @@ app.use((req, res) => {
   });
 });
 
-app.use(
-  (
-    error: unknown,
-    _req: Request,
-    res: Response,
-    _next: NextFunction,
-  ) => {
-    if (error instanceof ApiError) {
-      res.status(error.status).json({ error: error.message });
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (error instanceof ApiError) {
+    res.status(error.status).json({ error: error.message });
+    return;
+  }
+  if (error instanceof z.ZodError) {
+    res.status(400).json({ error: "Check the submitted details.", issues: error.flatten() });
+    return;
+  }
+  if (typeof error === "object" && error !== null && "type" in error) {
+    if (error.type === "entity.too.large") {
+      const message = _req.path.startsWith("/api/onboarding/photos/")
+        ? "Each photo must be 5 MB or smaller."
+        : "Image size exceeds maximum allowed";
+      res.status(413).json({ error: message });
       return;
     }
-    if (error instanceof z.ZodError) {
-      res.status(400).json({ error: "Check the submitted details.", issues: error.flatten() });
+    if (error.type === "entity.parse.failed") {
+      res.status(400).json({ error: "Invalid JSON." });
       return;
     }
-    if (typeof error === "object" && error !== null && "type" in error) {
-      if (error.type === "entity.too.large") {
-        const message = _req.path.startsWith("/api/onboarding/photos/")
-          ? "Each photo must be 5 MB or smaller." : "Image size exceeds maximum allowed";
-        res.status(413).json({ error: message });
-        return;
-      }
-      if (error.type === "entity.parse.failed") {
-        res.status(400).json({ error: "Invalid JSON." });
-        return;
-      }
-    }
-    console.error("API request failed", error instanceof Error ? error.name : "Unknown error");
-    res.status(503).json({ error: "Service is temporarily unavailable. Please try again later." });
-  },
-);
+  }
+  console.error("API request failed", error instanceof Error ? error.name : "Unknown error");
+  res.status(503).json({ error: "Service is temporarily unavailable. Please try again later." });
+});
 
 app.listen(env.PORT, () => {
   console.log(`API listening on http://localhost:${env.PORT}`);

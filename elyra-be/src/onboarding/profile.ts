@@ -8,21 +8,31 @@ export const profileSchema = z.object({
   age: z.number().int().min(18).max(100),
   gender: z.enum(genders),
   location: z.string().trim().min(1).max(120),
-  bio: z.string().trim().max(500).nullish().transform((value) => value ?? undefined),
-  interests: z.array(z.enum(interests)).min(3).max(10)
+  bio: z
+    .string()
+    .trim()
+    .max(500)
+    .nullish()
+    .transform((value) => value ?? undefined),
+  interests: z
+    .array(z.enum(interests))
+    .min(3)
+    .max(10)
     .refine((values) => new Set(values).size === values.length, "Select distinct interests"),
   personalityAnswers: z.object({
     weekend: z.enum(answers.weekend),
     connection: z.enum(answers.connection),
     spontaneity: z.enum(answers.spontaneity),
   }),
-  preferences: z.object({
-    minAge: z.number().int().min(18).max(100),
-    maxAge: z.number().int().min(18).max(100),
-    gender: z.enum(matchGenders),
-    maxDistance: z.number().int().min(1).max(20000),
-    relationship: z.enum(relationships),
-  }).refine(({ minAge, maxAge }) => minAge <= maxAge, "Enter an ordered age range"),
+  preferences: z
+    .object({
+      minAge: z.number().int().min(18).max(100),
+      maxAge: z.number().int().min(18).max(100),
+      gender: z.enum(matchGenders),
+      maxDistance: z.number().int().min(1).max(20000),
+      relationship: z.enum(relationships),
+    })
+    .refine(({ minAge, maxAge }) => minAge <= maxAge, "Enter an ordered age range"),
 });
 
 export function createDatabase(connectionString: string) {
@@ -34,7 +44,10 @@ export async function lock(tx: Prisma.TransactionClient, key: string) {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
   }
 }

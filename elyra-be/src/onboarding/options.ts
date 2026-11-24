@@ -1,6 +1,11 @@
 export const genders = ["Woman", "Man", "Nonbinary", "Other", "Prefer not to say"] as const;
 export const matchGenders = ["Women", "Men", "Nonbinary people", "Everyone"] as const;
-export const relationships = ["Long-term relationship", "Short-term dating", "Friendship", "Still figuring it out"] as const;
+export const relationships = [
+  "Long-term relationship",
+  "Short-term dating",
+  "Friendship",
+  "Still figuring it out",
+] as const;
 
 export const interestGroups = {
   Culture: ["Reading", "Film", "Music", "Photography", "Art", "Design"],
