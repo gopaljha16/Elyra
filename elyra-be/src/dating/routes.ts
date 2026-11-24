@@ -8,7 +8,7 @@ import { nearbyVenues } from "./venues.js";
 
 const idBody = z.object({ userId: z.string().min(1) });
 const reportBody = idBody.extend({ reason: z.string().trim().min(5).max(500) });
-const preferences = z.object({ minAge: z.number(), maxAge: z.number(), gender: z.string(), maxDistance: z.number() });
+const preferences = z.object({ minAge: z.number(), maxAge: z.number(), gender: z.string(), maxDistance: z.number(), relationship: z.string() });
 
 function eligible(user: User) {
   if (!user.isActive || !user.isOnboarded || user.verificationStatus !== "VERIFIED") {
@@ -20,11 +20,16 @@ function fits(viewer: User, candidate: User) {
   const prefs = preferences.safeParse(viewer.preferences);
   if (!prefs.success) return false;
   const p = prefs.data;
+  const otherPreferences = preferences.safeParse(candidate.preferences);
+  if (!otherPreferences.success) return false;
+  const relationshipFits = p.relationship === otherPreferences.data.relationship
+    || p.relationship === "Still figuring it out"
+    || otherPreferences.data.relationship === "Still figuring it out";
   const acceptedGender = p.gender === "Everyone" || p.gender === ({ Woman: "Women", Man: "Men" } as Record<string, string>)[candidate.gender]
     || p.gender === "Nonbinary people" && candidate.gender === "Nonbinary";
   const distance = viewer.latitude != null && viewer.longitude != null && candidate.latitude != null && candidate.longitude != null
     ? Math.hypot((viewer.latitude - candidate.latitude) * 111, (viewer.longitude - candidate.longitude) * 111) : null;
-  return acceptedGender && candidate.age >= p.minAge && candidate.age <= p.maxAge
+  return relationshipFits && acceptedGender && candidate.age >= p.minAge && candidate.age <= p.maxAge
     && distance !== null && distance <= p.maxDistance;
 }
 
@@ -33,6 +38,15 @@ function shared(a: User, b: User) {
     interests: a.interests.filter((item) => b.interests.includes(item)),
     activities: a.dateActivities.filter((item) => b.dateActivities.includes(item)),
   };
+}
+
+function compatibility(a: User, b: User) {
+  const common = shared(a, b);
+  const first = z.record(z.string(), z.string()).safeParse(a.personalityAnswers);
+  const second = z.record(z.string(), z.string()).safeParse(b.personalityAnswers);
+  const personality = first.success && second.success
+    ? Object.keys(first.data).filter((key) => first.data[key] === second.data[key]).length : 0;
+  return common.interests.length * 2 + common.activities.length * 3 + personality;
 }
 
 export function datingRoutes(db: PrismaClient, placesKey = "") {
@@ -65,7 +79,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
       const common = shared(user, person);
       return { id: person.id, name: person.name, age: person.age, location: person.location,
         interests: common.interests, activities: common.activities,
-        score: common.interests.length * 2 + common.activities.length * 3 };
+        score: compatibility(user, person) };
     }).sort((a, b) => b.score - a.score).slice(0, 20);
     res.json({ candidates: ranked });
   });
@@ -101,7 +115,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
     const match = await db.match.upsert({ where: { pairKey: `${user1Id}:${user2Id}` }, create: {
       pairKey: `${user1Id}:${user2Id}`, user1Id, user2Id, requestedById: user.id,
       acceptedByUser1: user.id === user1Id, acceptedByUser2: user.id === user2Id,
-      compatibilityScore: shared(user, other).interests.length * 2 + shared(user, other).activities.length * 3,
+      compatibilityScore: compatibility(user, other),
     }, update: {} });
     res.status(201).json({ match });
   });
@@ -210,7 +224,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
     const user = await self(clerkId(req));
     const { match } = await activeMatch(String(req.params.id), user);
     const plan = match.datePlan;
-    if (!plan?.scheduledAt || +plan.scheduledAt > Date.now()) throw new ApiError(409, "Feedback opens after the planned date.");
+    if (plan?.status !== "CONFIRMED" || !plan.scheduledAt || +plan.scheduledAt > Date.now()) throw new ApiError(409, "Feedback opens after a confirmed date.");
     const input = z.object({ attended: z.boolean(), rating: z.number().int().min(1).max(5), comfort: z.number().int().min(1).max(5), enjoyment: z.number().int().min(1).max(5), wouldMeetAgain: z.boolean(), review: z.string().trim().max(500).optional() }).parse(req.body);
     await db.feedback.upsert({ where: { matchId_userId: { matchId: match.id, userId: user.id } }, create: { matchId: match.id, userId: user.id, ...input }, update: input });
     res.json({ submitted: true });
