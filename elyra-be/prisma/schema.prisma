@@ -183,8 +183,12 @@ model UserReport {
   subjectId String
   reason String
   createdAt DateTime @default(now())
+  resolvedAt DateTime?
+  disposition String?
+  reviewerId String?
   reporter User @relation("ReportsMade", fields: [reporterId], references: [id])
   subject User @relation("ReportsReceived", fields: [subjectId], references: [id])
+  @@index([resolvedAt, createdAt])
   @@map("user_reports")
 }
 

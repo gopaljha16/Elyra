@@ -43,6 +43,10 @@ Matchmaking requires a separate live camera check. Configure `AWS_REGION` and `A
 
 Face liveness and face matching are probabilistic. They do not establish a person's legal identity or age. Treat reports and manual review as part of the public rollout.
 
+## Report review
+
+Set `VERIFICATION_ADMIN_IDS` to Clerk user IDs for trusted reviewers. The `/api/admin/reports` API lists open reports for those accounts. Reviewers can dismiss a report or suspend the reported account. Suspension makes the account ineligible for discovery, closes its matches, and cancels existing date plans. The frontend review queue is at `/admin/reports`. Report reasons and reviewer decisions stay on the backend.
+
 ## Existing API routes
 
 - `GET /health` reports API health.

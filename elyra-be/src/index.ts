@@ -17,6 +17,7 @@ import { createStorage } from "./onboarding/storage.js";
 import { verificationRoutes } from "./onboarding/verification.js";
 import { datingRoutes } from "./dating/routes.js";
 import { liveRoutes } from "./dating/live.js";
+import { moderationRoutes } from "./dating/moderation.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -85,6 +86,15 @@ app.use(
 app.use("/api/onboarding", onboardingRoutes(db, storage));
 app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY, storage));
 app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
+app.use(
+  "/api/admin",
+  moderationRoutes(
+    db,
+    env.VERIFICATION_ADMIN_IDS.split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  ),
+);
 
 type AuthedRequest = Request & {
   auth?: ReturnType<typeof getAuth>;
