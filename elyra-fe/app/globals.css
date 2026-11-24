@@ -1,26 +1,164 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  color-scheme: light;
+  --ink: #2e1924;
+  --soft: #66525e;
+  --line: #e8d8dd;
+  --paper: #fffaf7;
+  --primary: #842b50;
+  --primary-hover: #67203e;
+  --focus: #96505e;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  color: var(--ink);
+  background: #f7eae7;
+  font-family: system-ui, sans-serif;
+}
+
+.elyra-screen {
+  min-height: 100dvh;
+  padding: 0 24px 64px;
+  background: radial-gradient(ellipse at 15% 8%, #f4cfc9, transparent 48%),
+    radial-gradient(ellipse at 98% 35%, #ebdbe6, transparent 46%), #faf1eb;
+}
+
+.elyra-header {
+  min-height: 84px;
+  max-width: 930px;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.elyra-brand {
+  color: var(--primary);
+  white-space: nowrap;
+  font: 700 32px Georgia, serif;
+  letter-spacing: -0.045em;
+}
+.elyra-brand span { font-size: .7em; vertical-align: 0.12em; }
+
+.elyra-card {
+  width: min(100%, 680px);
+  margin: 20px auto 0;
+  padding: clamp(22px, 6vw, 57px);
+  background: var(--paper);
+  border: 1px solid #f1dee0;
+  border-radius: 28px;
+  box-shadow: 0 25px 70px #66345913;
+}
+
+.elyra-card h1 {
+  margin: 0 0 12px;
+  font: 500 clamp(36px, 6vw, 58px)/1.04 Georgia, serif;
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
+}
+.elyra-card p { color: var(--soft); line-height: 1.6; margin: 0 0 18px; }
+.elyra-card small { color: var(--soft); }
+.elyra-card > .action { margin-top: 12px; }
+
+.progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 32px;
+}
+.progress li { font-size: 12px; color: var(--soft); }
+.progress li span { height: 3px; margin-bottom: 7px; border-radius: 20px; display: block; background: var(--line); }
+.progress li.reached span { background: #bd7892; }
+.progress li[aria-current] { color: var(--primary); font-weight: 700; }
+.progress li[aria-current] span { background: var(--primary); }
+
+.elyra-card .step-label {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--primary);
+  margin: 0 0 10px;
+}
+.actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 23px; flex-wrap: wrap; }
+.action, .quiet, .outline, .chip, .radio-chip span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 17px;
+  min-height: 44px;
+  border-radius: 999px;
+  line-height: 1.25;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  text-decoration: none;
+}
+.action { background: var(--primary); color: white; border: 1px solid var(--primary); }
+.action:hover:not(:disabled) { background: var(--primary-hover); }
+.quiet { color: var(--primary); background: transparent; border: 1px solid transparent; }
+.quiet:hover:not(:disabled), .outline:hover:not(:disabled), .chip:hover:not(:disabled), .radio-chip:hover span { background: #f4e0e7; }
+.outline, .chip, .radio-chip span { color: var(--primary); background: transparent; border: 1px solid #cdaeb9; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+.form-fields { display: grid; gap: 15px; margin-top: 20px; min-width: 0; }
+.field { display: grid; gap: 5px; min-width: 0; }
+.field label, .interest-group legend { font-size: 14px; font-weight: 680; }
+.field :is(input, select, textarea) {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cdaeb9;
+  border-radius: 11px;
+  background: #fffdfb;
+  min-height: 43px;
+}
+.field textarea { resize: vertical; }
+.field [aria-invalid="true"] { border-color: #a3323e; }
+.field-error { color: #902633; font-size: 13px; }
+.field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.interest-group legend { margin-bottom: 7px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip[aria-pressed="true"], .radio-chip input:checked + span {
+  background: #f2dce6;
+  border-color: var(--primary);
+}
+.radio-chip { position: relative; }
+.radio-chip input { opacity: 0; position: absolute; width: 1px; height: 1px; }
+.radio-chip input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+.photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.photo-item { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; }
+.photo-preview { display: grid; place-items: center; aspect-ratio: 4 / 5; background: #f1e4e7; }
+.photo-preview span { font-size: 12px; text-align: center; padding: 7px; }
+.photo-preview img { width: 100%; height: 100%; object-fit: cover; }
+.photo-controls { display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap; font-size: 11px; padding: 4px; min-height: 34px; }
+.photo-controls .quiet { padding: 4px; min-height: 34px; font-size: 11px; }
+.photo-controls strong { color: var(--primary); }
+.upload { display: flex; position: relative; gap: 9px; padding: 19px; margin: 14px 0; justify-content: center; align-items: center; border: 1px dashed #ae8294; border-radius: 13px; font-weight: 670; cursor: pointer; color: var(--primary); }
+.upload:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+.upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.photo-grid + .step-label { margin-top: 14px; }
+.elyra-card .notice { color: #782638; background: #f7e3e6; border-radius: 10px; padding: 10px 14px; margin: 14px 0; font-size: 14px; }
+.notice li + li { margin-top: 5px; }
+
+.viewfinder { position: relative; display: grid; place-items: center; overflow: hidden; aspect-ratio: 4 / 3; border-radius: 14px; margin-bottom: 12px; background: #2e1924; }
+.viewfinder :is(video, img) { width: 100%; height: 100%; object-fit: contain; }
+.viewfinder video { transform: scaleX(-1); }
+.face-outline { position: absolute; inset: 12% 28%; border: 2px dashed #ffffffb5; border-radius: 50%; pointer-events: none; }
+.face-outline.ready { border: 3px solid #9ceeaf; }
+.elyra-card .camera-ready { color: #205b35; font-weight: 650; }
+.success-mark { background: #e9e8d9; color: #275a3f; border-radius: 50%; width: 48px; height: 48px; display: grid; place-items: center; font-size: 24px; margin-bottom: 16px; }
+.dashboard-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+
+@media (max-width: 500px) {
+  .elyra-screen { padding-inline: 12px; }
+  .elyra-header { min-height: 66px; padding-inline: 10px; }
+  .elyra-card { border-radius: 21px; margin-top: 4px; }
+  .progress { gap: 5px; }
+  .progress li { font-size: 10px; }
+  .photo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
