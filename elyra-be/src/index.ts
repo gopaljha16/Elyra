@@ -11,6 +11,12 @@ import express, {
 import helmet from "helmet";
 import morgan from "morgan";
 import { z } from "zod";
+import { ApiError, createDatabase } from "./onboarding/profile.js";
+import { onboardingRoutes } from "./onboarding/routes.js";
+import { createStorage } from "./onboarding/storage.js";
+import { verificationRoutes } from "./onboarding/verification.js";
+import { datingRoutes } from "./dating/routes.js";
+import { liveRoutes } from "./dating/live.js";
 
 const envSchema = z.object({
   NODE_ENV: z
@@ -20,8 +26,18 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
   CLERK_PUBLISHABLE_KEY: z.string().min(1),
   CLERK_SECRET_KEY: z.string().min(1),
-  DATABASE_URL: z.string().min(1).optional(),
+  DATABASE_URL: z.string().min(1),
+  SUPABASE_URL: z.url(),
+  SUPABASE_SERVICE_KEY: z.string().min(1),
+  SUPABASE_BUCKET: z.string().min(1).default("elyra-onboarding"),
+  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_MODEL: z.string().regex(/^[a-z0-9.-]+$/).default("gemini-3.5-flash-lite"),
+  VERIFICATION_ADMIN_IDS: z.string().default(""),
+  TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
+  GOOGLE_PLACES_API_KEY: z.string().default(""),
+  AWS_REGION: z.string().default(""),
+  AWS_LIVENESS_STREAM_ROLE_ARN: z.string().default(""),
 });
 
 let env: z.infer<typeof envSchema>;
@@ -29,13 +45,15 @@ try {
   env = envSchema.parse(process.env);
 } catch (error) {
   if (error instanceof z.ZodError) {
-    console.error("❌ Invalid environment variables:");
+    console.error("Invalid environment variables:");
     console.error(JSON.stringify(error.flatten().fieldErrors, null, 2));
     process.exit(1);
   }
   throw error;
 }
 const app = express();
+const trustedProxies = env.TRUSTED_PROXIES.split(",").map((value) => value.trim()).filter(Boolean);
+if (trustedProxies.length) app.set("trust proxy", trustedProxies);
 
 app.use(
   cors({
@@ -44,9 +62,21 @@ app.use(
   }),
 );
 app.use(helmet());
-app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(morgan(":method :safe-path :status :response-time ms"));
+morgan.token("safe-path", (req: Request) => req.originalUrl.split("?")[0]);
 app.use(express.json({ limit: "1mb" }));
-app.use(clerkMiddleware());
+app.use(clerkMiddleware({ authorizedParties: [env.FRONTEND_URL] }));
+const db = createDatabase(env.DATABASE_URL);
+const storage = createStorage(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, env.SUPABASE_BUCKET);
+app.use("/api/onboarding", verificationRoutes(db, storage, {
+  geminiKey: env.GEMINI_API_KEY,
+  geminiModel: env.GEMINI_MODEL,
+  ipHashKey: env.SUPABASE_SERVICE_KEY,
+  adminIds: env.VERIFICATION_ADMIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+}));
+app.use("/api/onboarding", onboardingRoutes(db, storage));
+app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY));
+app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
 
 type AuthedRequest = Request & {
   auth?: ReturnType<typeof getAuth>;
@@ -162,15 +192,28 @@ app.use(
     res: Response,
     _next: NextFunction,
   ) => {
-    console.error(error);
-
-    const message =
-      error instanceof Error ? error.message : "Internal server error";
-
-    res.status(500).json({
-      error: "Internal server error",
-      message,
-    });
+    if (error instanceof ApiError) {
+      res.status(error.status).json({ error: error.message });
+      return;
+    }
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: "Check the submitted details.", issues: error.flatten() });
+      return;
+    }
+    if (typeof error === "object" && error !== null && "type" in error) {
+      if (error.type === "entity.too.large") {
+        const message = _req.path.startsWith("/api/onboarding/photos/")
+          ? "Each photo must be 5 MB or smaller." : "Image size exceeds maximum allowed";
+        res.status(413).json({ error: message });
+        return;
+      }
+      if (error.type === "entity.parse.failed") {
+        res.status(400).json({ error: "Invalid JSON." });
+        return;
+      }
+    }
+    console.error("API request failed", error instanceof Error ? error.name : "Unknown error");
+    res.status(503).json({ error: "Service is temporarily unavailable. Please try again later." });
   },
 );
 

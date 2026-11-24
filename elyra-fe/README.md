@@ -1,36 +1,18 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Elyra web app
 
-## Getting Started
+The Next.js app takes signed-in users through profile setup, photo upload and selfie verification, then opens the dashboard. Draft fields and the current step are saved per Clerk account in browser storage. Uploaded photos and verification status are recovered from the API.
 
-First, run the development server:
+## Local setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Start the [Elyra API](../elyra-be/README.md).
+2. Run `bun install --frozen-lockfile` in `elyra-fe`.
+3. Copy `.env.example` to `.env` and supply the matching Clerk configuration and the public Supabase URL and publishable or legacy anon key. Set `NEXT_PUBLIC_API_URL` to the API origin. Build from a checkout containing both apps so the frontend can use the shared onboarding choices.
+4. Run `bun run dev` and open `http://localhost:3000`. Camera access requires HTTPS or localhost.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The browser loads the bundled Tiny Face Detector model and requests camera access when verification is available. Uploads, private photo previews, and verification requests use the authenticated Elyra API. The selfie preview stays on the device until the user submits it.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Profile photos are resized to at most 1024 pixels on the longest side and encoded as WebP in the browser when this reduces the file size. The server validates and processes the image again before private storage.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The dating dashboard requires a separate live camera check before opening nearby matching. It uses Amazon Rekognition Face Liveness through the Amplify React component. The backend creates the session and supplies short-lived streaming credentials to the signed-in account. Camera access requires HTTPS or localhost.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Run `bun run lint` and `bun run build` to check the frontend.
