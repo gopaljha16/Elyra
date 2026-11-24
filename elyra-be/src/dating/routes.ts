@@ -11,8 +11,9 @@ const reportBody = idBody.extend({ reason: z.string().trim().min(5).max(500) });
 const preferences = z.object({ minAge: z.number(), maxAge: z.number(), gender: z.string(), maxDistance: z.number(), relationship: z.string() });
 
 function eligible(user: User) {
-  if (!user.isActive || !user.isOnboarded || user.verificationStatus !== "VERIFIED") {
-    throw new ApiError(403, "Complete profile verification before matching.");
+  if (!user.isActive || !user.isOnboarded || user.verificationStatus !== "VERIFIED"
+    || !user.liveVerifiedAt || user.livePrimaryPhotoUrl !== user.primaryPhotoUrl) {
+    throw new ApiError(403, "Complete live face verification before matching.");
   }
 }
 

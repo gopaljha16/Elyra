@@ -37,6 +37,12 @@ The Gemini check considers visible spoof cues and compares the two faces. One st
 
 Add `GOOGLE_PLACES_API_KEY` to the backend environment to enable real venue suggestions. The API queries Google Nearby Search only when a matched pair opens the venue picker or submits a proposal. Enable Places API (New) for the key. Both users set an approximate area through browser location access. The first release matches people in the same city whose age, gender and distance preferences fit both ways. Each user chooses up to five date activities on the dashboard. After both accept, the pair can propose a venue and time. The other participant must accept the current proposal version. Feedback is private to the submitting account. The map provider returns venue names and addresses on demand.
 
+## Live verification for matchmaking
+
+Matchmaking requires a separate live camera check. Configure `AWS_REGION` and `AWS_LIVENESS_STREAM_ROLE_ARN` in the backend. The backend needs permission to create and read Rekognition Face Liveness sessions, compare faces, and call STS `AssumeRole` on the named stream role. The stream role must trust the backend role and grant only `rekognition:StartFaceLivenessSession`. A signed-in user receives temporary stream credentials for one 15-minute STS session. The Rekognition liveness session itself expires after three minutes, so every retry creates a new session. The API allows three sessions per account per 24 hours. On completion, the server requires a liveness confidence of at least 90 and face similarity of at least 90 against the primary photo. The result is bound to that photo. Calibrate these thresholds with pilot data before opening the service to the public. AWS credentials and a supported region are required for the live check. The API returns a configuration error until they are present.
+
+Face liveness and face matching are probabilistic. They do not establish a person's legal identity or age. Treat reports and manual review as part of the public rollout.
+
 ## Existing API routes
 
 - `GET /health` reports API health.

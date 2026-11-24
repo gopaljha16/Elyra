@@ -33,6 +33,9 @@ model User {
   verificationStatus     VerificationStatus @default(UNVERIFIED)
   verificationNote       String?          // reason if rejected
   verifiedAt             DateTime?
+  liveVerifiedAt         DateTime?
+  livePrimaryPhotoUrl    String?
+  liveSessions           LiveSession[]
 
   // Matching data
   interests          String[]           @default([])
@@ -183,4 +186,16 @@ model UserReport {
   reporter User @relation("ReportsMade", fields: [reporterId], references: [id])
   subject User @relation("ReportsReceived", fields: [subjectId], references: [id])
   @@map("user_reports")
+}
+
+model LiveSession {
+  id String @id
+  userId String
+  primaryPhotoUrl String
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  result String @default("PENDING")
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId, createdAt])
+  @@map("live_sessions")
 }

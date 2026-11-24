@@ -153,7 +153,7 @@ export function onboardingRoutes(db: PrismaClient, storage: Storage) {
       await lock(tx, id);
       const current = await editableUser(tx, id);
       if (!current.profilePhotos.includes(url)) throw new ApiError(404, "Photo not found.");
-      return tx.user.update({ where: { id: current.id }, data: { primaryPhotoUrl: url } });
+      return tx.user.update({ where: { id: current.id }, data: { primaryPhotoUrl: url, liveVerifiedAt: null, livePrimaryPhotoUrl: null } });
     });
     res.json(profileResponse(user));
   });

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
+import "@aws-amplify/ui-react-liveness/styles.css";
 
 export const metadata: Metadata = {
   title: "Elyra",
