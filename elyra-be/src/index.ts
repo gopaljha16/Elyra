@@ -14,6 +14,7 @@ import { z } from "zod";
 import { ApiError, createDatabase } from "./onboarding/profile.js";
 import { onboardingRoutes } from "./onboarding/routes.js";
 import { createStorage } from "./onboarding/storage.js";
+import { verificationRoutes } from "./onboarding/verification.js";
 
 const envSchema = z.object({
   NODE_ENV: z
@@ -27,6 +28,10 @@ const envSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_SERVICE_KEY: z.string().min(1),
   SUPABASE_BUCKET: z.string().min(1).default("elyra-onboarding"),
+  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_MODEL: z.string().regex(/^[a-z0-9.-]+$/).default("gemini-3.5-flash-lite"),
+  VERIFICATION_ADMIN_IDS: z.string().default(""),
+  TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
 });
 
@@ -42,6 +47,8 @@ try {
   throw error;
 }
 const app = express();
+const trustedProxies = env.TRUSTED_PROXIES.split(",").map((value) => value.trim()).filter(Boolean);
+if (trustedProxies.length) app.set("trust proxy", trustedProxies);
 
 app.use(
   cors({
@@ -56,6 +63,12 @@ app.use(express.json({ limit: "1mb" }));
 app.use(clerkMiddleware({ authorizedParties: [env.FRONTEND_URL] }));
 const db = createDatabase(env.DATABASE_URL);
 const storage = createStorage(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, env.SUPABASE_BUCKET);
+app.use("/api/onboarding", verificationRoutes(db, storage, {
+  geminiKey: env.GEMINI_API_KEY,
+  geminiModel: env.GEMINI_MODEL,
+  ipHashKey: env.SUPABASE_SERVICE_KEY,
+  adminIds: env.VERIFICATION_ADMIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
+}));
 app.use("/api/onboarding", onboardingRoutes(db, storage));
 
 type AuthedRequest = Request & {

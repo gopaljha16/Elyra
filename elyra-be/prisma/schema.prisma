@@ -72,7 +72,16 @@ model VerificationLog {
   status        VerificationStatus
   createdAt     DateTime @default(now())
 
+  failureReason     String?
+  attemptIpHash     String?
+  geminiRequestedAt DateTime?
+  geminiImageBytes  Int?
+
   user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([attemptIpHash, createdAt])
+  @@index([geminiRequestedAt])
 
   @@map("verification_logs")
 }

@@ -9,6 +9,7 @@ import { photoLimit, photoTypes } from "./options.js";
 
 export type Storage = ReturnType<typeof createStorage>;
 export const photoPath = (clerkId: string, id: string) => `${clerkId}/photos/${id}`;
+export const staleAttempt = 120_000;
 export const rawImage = (limit: number) => raw({ type: "image/*", limit });
 const photoId = z.uuid();
 const photoRequest = z.object({ type: z.enum(photoTypes), size: z.number().int().positive().max(photoLimit) });
@@ -23,7 +24,22 @@ export async function editableUser(tx: Prisma.TransactionClient, id: string) {
   const user = await tx.user.findUnique({ where: { clerkId: id } });
   if (!user) throw new ApiError(409, "Complete your profile details first.");
   if (user.isOnboarded) throw new ApiError(409, "Onboarding is already complete.");
-  if (user.verificationStatus === "PENDING") throw new ApiError(409, "Verification is in progress.");
+  if (user.verificationStatus === "PENDING") {
+    const latest = await tx.verificationLog.findFirst({
+      where: { userId: user.id, status: "PENDING" }, orderBy: { createdAt: "desc" },
+    });
+    if (latest && Date.now() - +latest.createdAt < staleAttempt) {
+      throw new ApiError(409, "Verification is in progress.");
+    }
+    if (latest) await tx.verificationLog.update({
+      where: { id: latest.id },
+      data: { status: "REJECTED", aiCheckPassed: false, failureReason: "verification timeout" },
+    });
+    return tx.user.update({
+      where: { id: user.id },
+      data: { verificationStatus: "REJECTED", verificationNote: "verification timeout" },
+    });
+  }
   return user;
 }
 
@@ -71,7 +87,10 @@ export function onboardingRoutes(db: PrismaClient, storage: Storage) {
   router.post("/photos/upload-url", async (req, res) => {
     photoRequest.parse(req.body);
     const id = clerkId(req);
-    const user = await editableUser(db, id);
+    const user = await db.$transaction(async (tx) => {
+      await lock(tx, id);
+      return editableUser(tx, id);
+    });
     if (user.profilePhotos.length >= 5) throw new ApiError(409, "You can upload up to 5 photos.");
     res.json(storage.issue(id, randomUUID()));
   });
@@ -136,7 +155,11 @@ export function onboardingRoutes(db: PrismaClient, storage: Storage) {
         data: { profilePhotos: photos, primaryPhotoUrl: current.primaryPhotoUrl === url ? photos[0] ?? null : current.primaryPhotoUrl },
       });
     });
-    await storage.remove(path).catch(() => console.error("A private photo could not be removed from storage."));
+    await db.$transaction(async (tx) => {
+      await lock(tx, id);
+      const current = await tx.user.findUnique({ where: { clerkId: id } });
+      if (!current?.profilePhotos.includes(url)) await storage.remove(path);
+    }, { timeout: 15_000 }).catch(() => console.error("A private photo could not be removed from storage."));
     res.json(profileResponse(user));
   });
 
