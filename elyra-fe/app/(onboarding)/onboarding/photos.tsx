@@ -7,6 +7,22 @@ import { json, message, type Api, type PhotoStatus } from "@/lib/onboarding";
 
 type Pending = { file: File; id: string; uploadPath?: string };
 
+async function compressPhoto(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const compressed = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+    if (!compressed || compressed.type !== "image/webp" || compressed.size >= file.size) return file;
+    return new File([compressed], file.name.replace(/\.[^.]+$/, "") + ".webp", { type: "image/webp" });
+  } finally { bitmap.close(); }
+}
+
 function Preview({ api, id, file, alt }: { api?: Api; id?: string; file?: File; alt: string }) {
   const [url, setUrl] = useState("");
   const [failed, setFailed] = useState(false);
@@ -71,7 +87,7 @@ export function PhotoStep({ api, status, update, onBack, onNext }: {
     setBusy(false);
   }
 
-  function select(files: File[]) {
+  async function select(files: File[]) {
     const valid: Pending[] = [];
     const invalid: string[] = [];
     const available = 5 - status.photos.length;
@@ -79,7 +95,10 @@ export function PhotoStep({ api, status, update, onBack, onNext }: {
       if (!(photoTypes as readonly string[]).includes(file.type)) invalid.push(`${file.name} — Choose JPEG, PNG, or WebP.`);
       else if (file.size > photoLimit) invalid.push(`${file.name} — Each photo must be 5 MB or smaller.`);
       else if (valid.length >= available) invalid.push(`${file.name} — You can upload up to 5 photos.`);
-      else valid.push({ file, id: crypto.randomUUID() });
+      else {
+        try { valid.push({ file: await compressPhoto(file), id: crypto.randomUUID() }); }
+        catch { invalid.push(`${file.name} — Couldn’t read this image.`); }
+      }
     }
     void upload(valid, invalid);
   }
@@ -110,7 +129,7 @@ export function PhotoStep({ api, status, update, onBack, onNext }: {
     {!pending.length && status.photos.length < 5 && <label className="upload">
       <span aria-hidden="true">＋</span> Add photos
       <input type="file" accept={photoTypes.join(",")} multiple disabled={busy} onChange={(e) => {
-        select(Array.from(e.currentTarget.files ?? []));
+        void select(Array.from(e.currentTarget.files ?? []));
         e.currentTarget.value = "";
       }} />
     </label>}

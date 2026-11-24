@@ -53,6 +53,7 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
       credentials = result.Credentials;
       if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken) throw new Error("Missing temporary credentials");
     } catch (error) {
+      await db.liveSession.deleteMany({ where: { id: sessionId, result: "PENDING" } });
       console.error("Live streaming credentials failed", error instanceof Error ? error.name : "Unknown error");
       throw new ApiError(503, "Live verification is temporarily unavailable.");
     }
