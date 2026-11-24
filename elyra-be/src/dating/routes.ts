@@ -28,7 +28,15 @@ function fits(viewer: User, candidate: User) {
   const acceptedGender = p.gender === "Everyone" || p.gender === ({ Woman: "Women", Man: "Men" } as Record<string, string>)[candidate.gender]
     || p.gender === "Nonbinary people" && candidate.gender === "Nonbinary";
   const distance = viewer.latitude != null && viewer.longitude != null && candidate.latitude != null && candidate.longitude != null
-    ? Math.hypot((viewer.latitude - candidate.latitude) * 111, (viewer.longitude - candidate.longitude) * 111) : null;
+    ? (() => {
+      const toRadians = Math.PI / 180;
+      const deltaLatitude = (candidate.latitude! - viewer.latitude!) * toRadians;
+      const deltaLongitude = (candidate.longitude! - viewer.longitude!) * toRadians;
+      const arc = Math.sin(deltaLatitude / 2) ** 2
+        + Math.cos(viewer.latitude! * toRadians) * Math.cos(candidate.latitude! * toRadians)
+        * Math.sin(deltaLongitude / 2) ** 2;
+      return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(arc)));
+    })() : null;
   return relationshipFits && acceptedGender && candidate.age >= p.minAge && candidate.age <= p.maxAge
     && distance !== null && distance <= p.maxDistance;
 }
@@ -122,12 +130,15 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
 
   router.get("/matches", async (req, res) => {
     const user = await self(clerkId(req));
-    const matches = await db.match.findMany({ where: { OR: [{ user1Id: user.id }, { user2Id: user.id }] }, include: { user1: true, user2: true, datePlan: true }, orderBy: { updatedAt: "desc" } });
+    const matches = await db.match.findMany({ where: { status: { not: "REJECTED" }, OR: [{ user1Id: user.id }, { user2Id: user.id }] }, include: { user1: true, user2: true, datePlan: true, feedbacks: { select: { userId: true, attended: true, wouldMeetAgain: true, planVersion: true } } }, orderBy: { updatedAt: "desc" } });
     res.json({ matches: matches.map((match) => {
       const other = match.user1Id === user.id ? match.user2 : match.user1;
+      const feedback = match.feedbacks.filter((entry) => entry.planVersion === match.datePlan?.proposalVersion);
       return { id: match.id, status: match.status, acceptedByMe: match.user1Id === user.id ? match.acceptedByUser1 : match.acceptedByUser2,
         acceptedByThem: match.user1Id === user.id ? match.acceptedByUser2 : match.acceptedByUser1,
-        person: { id: other.id, name: other.name, age: other.age }, activities: shared(user, other).activities, plan: match.datePlan };
+        person: { id: other.id, name: other.name, age: other.age }, activities: shared(user, other).activities,
+        plan: match.datePlan, feedbackSubmitted: feedback.some((entry) => entry.userId === user.id),
+        bothWantAgain: feedback.length === 2 && feedback.every((entry) => entry.attended && entry.wouldMeetAgain) };
     }) });
   });
 
@@ -189,9 +200,17 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
     const data = { activity: input.activity, venueId: venue.id, scheduledAt, location: venue.name,
       activities: [input.activity], status: "PROPOSED", proposedById: user.id,
       acceptedByUser1: match.user1Id === user.id, acceptedByUser2: match.user2Id === user.id };
-    const plan = await db.datePlan.upsert({ where: { matchId: match.id }, create: {
-      matchId: match.id, ...data, totalBudget: "", duration: "", vibe: "",
-    }, update: { ...data, proposalVersion: { increment: 1 } } });
+    const plan = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
+      const current = await tx.datePlan.findUnique({ where: { matchId: match.id } });
+      if (current?.status === "CONFIRMED") {
+        if (current.scheduledAt && +current.scheduledAt > Date.now()) throw new ApiError(409, "Cancel the confirmed plan before proposing another.");
+        const feedback = await tx.feedback.findMany({ where: { matchId: match.id, planVersion: current.proposalVersion }, select: { attended: true, wouldMeetAgain: true } });
+        if (feedback.length !== 2 || !feedback.every((entry) => entry.attended && entry.wouldMeetAgain)) throw new ApiError(409, "Another date needs interest from both people.");
+      }
+      return current ? tx.datePlan.update({ where: { id: current.id }, data: { ...data, proposalVersion: { increment: 1 } } })
+        : tx.datePlan.create({ data: { matchId: match.id, ...data, totalBudget: "", duration: "", vibe: "" } });
+    });
     res.json({ plan });
   });
 
@@ -216,7 +235,10 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
   router.post("/matches/:id/plan/cancel", async (req, res) => {
     const user = await self(clerkId(req));
     const { match } = await activeMatch(String(req.params.id), user);
-    await db.datePlan.updateMany({ where: { matchId: match.id }, data: { status: "CANCELLED" } });
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
+      await tx.datePlan.updateMany({ where: { matchId: match.id, status: { in: ["PROPOSED", "CONFIRMED"] } }, data: { status: "CANCELLED", proposalVersion: { increment: 1 } } });
+    });
     res.status(204).end();
   });
 
@@ -226,7 +248,20 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
     const plan = match.datePlan;
     if (plan?.status !== "CONFIRMED" || !plan.scheduledAt || +plan.scheduledAt > Date.now()) throw new ApiError(409, "Feedback opens after a confirmed date.");
     const input = z.object({ attended: z.boolean(), rating: z.number().int().min(1).max(5), comfort: z.number().int().min(1).max(5), enjoyment: z.number().int().min(1).max(5), wouldMeetAgain: z.boolean(), review: z.string().trim().max(500).optional() }).parse(req.body);
-    await db.feedback.upsert({ where: { matchId_userId: { matchId: match.id, userId: user.id } }, create: { matchId: match.id, userId: user.id, ...input }, update: input });
+    await db.feedback.upsert({ where: { matchId_userId_planVersion: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion } }, create: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion, ...input }, update: input });
+    res.json({ submitted: true });
+  });
+
+  router.post("/matches/:id/no-show", async (req, res) => {
+    const user = await self(clerkId(req));
+    const { match } = await activeMatch(String(req.params.id), user);
+    const plan = match.datePlan;
+    if (plan?.status !== "CONFIRMED" || !plan.scheduledAt || +plan.scheduledAt > Date.now()) throw new ApiError(409, "No-show reporting opens after a confirmed date.");
+    await db.feedback.upsert({
+      where: { matchId_userId_planVersion: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion } },
+      create: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion, attended: false, rating: 1, comfort: 1, enjoyment: 1, wouldMeetAgain: false },
+      update: { attended: false, rating: 1, comfort: 1, enjoyment: 1, wouldMeetAgain: false },
+    });
     res.json({ submitted: true });
   });
 

@@ -154,8 +154,9 @@ model Feedback {
   successScore   Float?
   createdAt      DateTime @default(now())
   attended      Boolean?
+  planVersion   Int @default(0)
 
-  @@unique([matchId, userId])
+  @@unique([matchId, userId, planVersion])
 
   match Match @relation(fields: [matchId], references: [id])
   user  User  @relation(fields: [userId], references: [id])

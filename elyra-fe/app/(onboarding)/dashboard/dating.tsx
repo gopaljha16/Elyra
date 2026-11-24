@@ -5,8 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { endpoint, message } from "@/lib/onboarding";
 
 type Candidate = { id: string; name: string; age: number; location: string; interests: string[]; activities: string[] };
-type Plan = { activity: string | null; location: string; scheduledAt: string | null; status: string; proposalVersion: number } | null;
-type Match = { id: string; status: string; person: { id: string; name: string; age: number }; acceptedByMe: boolean; acceptedByThem: boolean; activities: string[]; plan: Plan };
+type Plan = { activity: string | null; location: string; venueId: string | null; scheduledAt: string | null; status: string; proposalVersion: number } | null;
+type Match = { id: string; status: string; person: { id: string; name: string; age: number }; acceptedByMe: boolean; acceptedByThem: boolean; activities: string[]; plan: Plan; feedbackSubmitted: boolean; bothWantAgain: boolean };
 type Venue = { id: string; name: string; address: string };
 const options = ["Coffee", "Bowling", "Arcade", "Museum", "Mall", "Walk"];
 
@@ -94,14 +94,18 @@ export function Dating({ initialActivities, initialLocation }: { initialActiviti
       {match.status === "PENDING" && <button className="quiet" disabled={busy} onClick={() => void act(async () => { await request(`/matches/${match.id}/decline`, "POST"); })}>Decline</button>}
       {match.status === "ACTIVE" && <><p>Shared activities: {match.activities.join(", ") || "none selected"}</p><button className="outline" disabled={busy || !match.activities.length} onClick={() => void act(() => loadVenues(match))}>Plan a date</button></>}
       {match.plan && <p>Plan: {match.plan.activity} at {match.plan.location}, {match.plan.scheduledAt ? new Date(match.plan.scheduledAt).toLocaleString() : "time pending"} · {match.plan.status}</p>}
+      {match.plan?.status === "CONFIRMED" && <a className="outline" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.plan.location)}&query_place_id=${encodeURIComponent(match.plan.venueId ?? "")}`}>Directions</a>}
+      {match.bothWantAgain && <p>You are both interested in meeting again. You can propose another date.</p>}
       {match.plan?.status === "PROPOSED" && <button className="action" disabled={busy} onClick={() => void act(async () => { await request(`/matches/${match.id}/plan/accept`, "POST", { version: match.plan?.proposalVersion }); })}>Accept this plan</button>}
       {match.plan && match.plan.status !== "CANCELLED" && <button className="quiet" disabled={busy} onClick={() => void act(async () => { await request(`/matches/${match.id}/plan/cancel`, "POST"); })}>Cancel plan</button>}
-      {match.plan?.scheduledAt && new Date(match.plan.scheduledAt) <= new Date() && <div className="feedback-box"><h3>How was your date?</h3>
+      {match.plan?.status === "CONFIRMED" && match.plan.scheduledAt && new Date(match.plan.scheduledAt) <= new Date() && !match.feedbackSubmitted && <div className="feedback-box"><h3>How was your date?</h3>
         <label><input type="checkbox" checked={feedback[match.id]?.attended ?? false} onChange={(event) => setFeedback((previous) => ({ ...previous, [match.id]: { ...previous[match.id], attended: event.target.checked, rating: previous[match.id]?.rating ?? 3, comfort: previous[match.id]?.comfort ?? 3, enjoyment: previous[match.id]?.enjoyment ?? 3, wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false } }))} /> We met in person</label>
         {(["rating", "comfort", "enjoyment"] as const).map((field) => <div className="field" key={field}><label htmlFor={`${match.id}-${field}`}>{field === "rating" ? "Overall" : field === "comfort" ? "Comfort" : "Enjoyment"} (1–5)</label><select id={`${match.id}-${field}`} value={feedback[match.id]?.[field] ?? 3} onChange={(event) => setFeedback((previous) => ({ ...previous, [match.id]: { attended: previous[match.id]?.attended ?? false, wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false, rating: previous[match.id]?.rating ?? 3, comfort: previous[match.id]?.comfort ?? 3, enjoyment: previous[match.id]?.enjoyment ?? 3, [field]: Number(event.target.value) } }))}>{[1, 2, 3, 4, 5].map((value) => <option key={value}>{value}</option>)}</select></div>)}
         <label><input type="checkbox" checked={feedback[match.id]?.wouldMeetAgain ?? false} onChange={(event) => setFeedback((previous) => ({ ...previous, [match.id]: { attended: previous[match.id]?.attended ?? false, rating: previous[match.id]?.rating ?? 3, comfort: previous[match.id]?.comfort ?? 3, enjoyment: previous[match.id]?.enjoyment ?? 3, wouldMeetAgain: event.target.checked } }))} /> I would meet again</label>
         <button className="action" disabled={busy} onClick={() => void act(async () => { await request(`/matches/${match.id}/feedback`, "POST", { attended: feedback[match.id]?.attended ?? false, rating: feedback[match.id]?.rating ?? 3, comfort: feedback[match.id]?.comfort ?? 3, enjoyment: feedback[match.id]?.enjoyment ?? 3, wouldMeetAgain: feedback[match.id]?.wouldMeetAgain ?? false }); setNotice("Your feedback was saved privately."); })}>Save private feedback</button>
+        <button className="quiet" disabled={busy} onClick={() => void act(async () => { await request(`/matches/${match.id}/no-show`, "POST"); setNotice("Your no-show report was saved privately."); })}>We didn’t meet</button>
       </div>}
+      {match.feedbackSubmitted && <p>Your feedback was saved privately.</p>}
       <button className="quiet" disabled={busy} onClick={() => void act(async () => { await request("/blocks", "POST", { userId: match.person.id }); })}>Block</button>
       <button className="quiet" disabled={busy} onClick={() => { const reason = window.prompt("What happened?"); if (reason) void act(async () => { await request("/reports", "POST", { userId: match.person.id, reason }); }); }}>Report</button>
     </article>)}
