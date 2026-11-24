@@ -19,7 +19,7 @@ export default async function DashboardPage() {
   } catch {
     return (
       <Shell>
-        <h1>We couldnâ€™t load your dashboard.</h1>
+        <h1>We could not load your dashboard.</h1>
         <a className="action" href="">
           Try again
         </a>
@@ -35,7 +35,7 @@ export default async function DashboardPage() {
         <h1>Welcome{status.profile?.name ? `, ${status.profile.name}` : ""}.</h1>
         <UserButton />
       </div>
-      <p>Your Elyra profile is set up and verified.</p>
+      <p>Your Elyra profile setup is complete.</p>
       <LiveCheck activities={status.dateActivities} location={status.location} />
     </Shell>
   );

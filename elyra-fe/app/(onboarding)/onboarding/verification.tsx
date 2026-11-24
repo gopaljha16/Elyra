@@ -7,11 +7,11 @@ import { Camera } from "./camera";
 
 function failureMessage(reason: string | null) {
   if (reason === "liveness check failed")
-    return "We couldnâ€™t confirm the selfie looked like a live capture. Try again in even lighting.";
+    return "We could not confirm the selfie looked like a live capture. Try again in even lighting.";
   if (reason === "face mismatch")
-    return "The selfie didnâ€™t match your primary photo. Use a clear, recent photo of yourself.";
+    return "The selfie did not match your primary photo. Use a clear, recent photo of yourself.";
   if (reason === "verification timeout") return "Verification timed out. Try again.";
-  return reason ? "Your last verification attempt couldnâ€™t be completed." : "";
+  return reason ? "Your last verification attempt could not be completed." : "";
 }
 
 export function Verification({
@@ -114,7 +114,7 @@ export function Verification({
   const blocked = exhausted || pending || retryAt > 0;
   return (
     <>
-      <h1>Verify itâ€™s you</h1>
+      <h1>Verify it is you</h1>
       <p>
         Take a clear selfie in good light. When you submit it, Elyra sends your selfie and primary
         photo to Google Gemini for comparison.
@@ -124,7 +124,7 @@ export function Verification({
           {notice}
         </p>
       )}
-      {!attempt && !notice && <p role="status">Checking verification statusâ€¦</p>}
+      {!attempt && !notice && <p role="status">Checking verification status...</p>}
       {!attempt && notice && (
         <button
           className="outline"
@@ -143,7 +143,7 @@ export function Verification({
       )}
       {exhausted && !pending && (
         <p>
-          Youâ€™ve used all three attempts. Contact Elyra support or try again when an attempt
+          You have used all three attempts. Contact Elyra support or try again when an attempt
           becomes available.
         </p>
       )}
@@ -188,7 +188,7 @@ export function Verification({
               Retake
             </button>
             <button className="action" disabled={submitting} onClick={submit}>
-              {submitting ? "Verifyingâ€¦" : "Submit selfie"}
+              {submitting ? "Verifying..." : "Submit selfie"}
             </button>
           </div>
         </div>

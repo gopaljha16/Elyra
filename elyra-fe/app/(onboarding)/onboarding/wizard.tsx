@@ -84,10 +84,12 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
     return (
       <Shell>
         <div className="success-mark" aria-hidden="true">
-          âœ“
+          ✓
         </div>
-        <h1>Youâ€™re ready to meet.</h1>
-        <p>Congratulations! Your Elyra profile is verified and ready to go.</p>
+        <h1>Your profile is ready.</h1>
+        <p>
+          Congratulations! Complete a live camera check on your dashboard before meeting people.
+        </p>
         <div className="actions">
           <Link className="action" href="/dashboard">
             Go to dashboard
@@ -99,7 +101,7 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
   if (!draft)
     return (
       <Shell>
-        <p role="status">Loading your setupâ€¦</p>
+        <p role="status">Loading your setup...</p>
       </Shell>
     );
   const { stage, step, form } = draft;
