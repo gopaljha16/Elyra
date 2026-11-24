@@ -8,7 +8,7 @@ export const profileSchema = z.object({
   age: z.number().int().min(18).max(100),
   gender: z.enum(genders),
   location: z.string().trim().min(1).max(120),
-  bio: z.string().trim().max(500).optional(),
+  bio: z.string().trim().max(500).nullish().transform((value) => value ?? undefined),
   interests: z.array(z.enum(interests)).min(3).max(10)
     .refine((values) => new Set(values).size === values.length, "Select distinct interests"),
   personalityAnswers: z.object({

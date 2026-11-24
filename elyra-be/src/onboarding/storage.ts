@@ -23,6 +23,9 @@ export async function validateImage(bytes: Buffer, allowed: readonly string[], m
 export function createStorage(projectUrl: string, serviceKey: string, bucket: string) {
   const root = new URL("/storage/v1/object/", projectUrl).href;
   const bucketPath = encodeURIComponent(bucket);
+  const authHeaders = serviceKey.startsWith("sb_secret_")
+    ? { apikey: serviceKey }
+    : { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
   const objectPath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
   const url = (path: string) => root + "authenticated/" + bucketPath + "/" + objectPath(path);
   const signature = (userId: string, id: string, expires: number) =>
@@ -32,7 +35,7 @@ export function createStorage(projectUrl: string, serviceKey: string, bucket: st
     try {
       const result = await fetch(root + path, {
         ...init,
-        headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, ...init.headers },
+        headers: { ...authHeaders, ...init.headers },
         signal: AbortSignal.timeout(10_000),
       });
       if (!result.ok) {

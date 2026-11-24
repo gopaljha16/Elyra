@@ -93,10 +93,14 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
         }
 
         await tx.verificationLog.create({ data: {
-          id: attemptId, userId: user.id, selfieUrl, attemptIpHash: ipHash, reviewedBy: "ai", status: "PENDING",
+          id: attemptId, userId: user.id, selfieUrl, attemptIpHash: ipHash, reviewedBy: "ai", status: "PENDING", createdAt: now,
         } });
         await tx.user.update({ where: { id: user.id }, data: { verificationStatus: "PENDING", verificationNote: null } });
-        return { user, profile: profile.data, primaryPhotoUrl: user.primaryPhotoUrl, remaining: 2 - attempts.length };
+        return {
+          user, profile: profile.data, primaryPhotoUrl: user.primaryPhotoUrl,
+          remaining: 2 - attempts.length,
+          retryAfter: attempts.length === 2 ? retrySeconds(attempts[0].createdAt, day, now) : null,
+        };
       });
 
       let failure: string | null = null;
@@ -125,13 +129,17 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
       }
 
       const status = failure ? "REJECTED" : "VERIFIED";
-      await db.$transaction(async (tx) => {
+      const persistResult = () => db.$transaction(async (tx) => {
         await lock(tx, id);
         const saved = await tx.verificationLog.updateMany({
           where: { id: attemptId, status: "PENDING" },
           data: { status, aiCheckPassed: !failure, aiReason: JSON.stringify(rawResponse), failureReason: failure },
         });
-        if (saved.count !== 1) throw new ApiError(409, "This verification attempt expired. Try again.");
+        if (saved.count !== 1) {
+          const existing = await tx.verificationLog.findUnique({ where: { id: attemptId } });
+          if (existing?.status === status && existing.aiReason === JSON.stringify(rawResponse)) return;
+          throw new ApiError(409, "This verification attempt expired. Try again.");
+        }
         await tx.user.update({ where: { id: attempt.user.id }, data: {
           ...(failure ? {} : { ...attempt.profile, bio: attempt.profile.bio || null }),
           verificationStatus: status, verificationNote: failure,
@@ -139,11 +147,18 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
           isOnboarded: !failure, verifiedAt: failure ? null : new Date(),
         } });
       });
+      try {
+        await persistResult();
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        // A transient database error can be retried without resending biometric images.
+        await persistResult();
+      }
       if (serviceError) {
-        res.status(serviceError.status).json({ error: serviceError.message, reason: failure, remaining: attempt.remaining });
+        res.status(serviceError.status).json({ error: serviceError.message, reason: failure, remaining: attempt.remaining, retryAfter: attempt.retryAfter });
         return;
       }
-      res.json({ verified: !failure, reason: failure, remaining: attempt.remaining });
+      res.json({ verified: !failure, reason: failure, remaining: attempt.remaining, retryAfter: attempt.retryAfter });
     } catch (error) {
       if (error instanceof RateError) {
         res.set("Retry-After", String(error.retryAfter)).status(429).json({ error: error.message, retryAfter: error.retryAfter });
