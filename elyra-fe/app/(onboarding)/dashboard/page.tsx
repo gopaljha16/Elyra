@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { onboardingRequest, type OnboardingStatus } from "@/lib/onboarding";
 import { Shell } from "../onboarding/shell";
 import { ClearDraft } from "../onboarding/draft-storage";
+import { Dating } from "./dating";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -22,5 +23,6 @@ export default async function DashboardPage() {
     <ClearDraft userId={session.userId} />
     <div className="dashboard-heading"><h1>Welcome{status.profile?.name ? `, ${status.profile.name}` : ""}.</h1><UserButton /></div>
     <p>Your Elyra profile is set up and verified.</p>
+    <Dating initialActivities={status.dateActivities} initialLocation={status.location} />
   </Shell>;
 }

@@ -153,6 +153,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .elyra-card .camera-ready { color: #205b35; font-weight: 650; }
 .success-mark { background: #e9e8d9; color: #275a3f; border-radius: 50%; width: 48px; height: 48px; display: grid; place-items: center; font-size: 24px; margin-bottom: 16px; }
 .dashboard-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.dating-panel { margin-top: 32px; display: grid; gap: 14px; }
+.dating-panel h2 { font: 500 28px Georgia, serif; margin: 18px 0 0; }
+.dating-panel h3 { font: 500 20px Georgia, serif; }
+.dating-item { border: 1px solid var(--line); padding: 18px; border-radius: 15px; margin: 10px 0; }
+.dating-item p { margin: 8px 0; }
+.dating-item button { margin: 4px; }
+.dating-item select, .dating-item input { min-height: 40px; max-width: 100%; padding: 6px; }
+.feedback-box { display: grid; gap: 10px; padding: 12px 0; }
 
 @media (max-width: 500px) {
   .elyra-screen { padding-inline: 12px; }

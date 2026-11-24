@@ -16,6 +16,8 @@ export type PhotoStatus = {
   primaryPhotoId: string | null;
   isOnboarded: boolean;
   verificationStatus: "UNVERIFIED" | "PENDING" | "VERIFIED" | "REJECTED";
+  dateActivities: string[];
+  location: string;
 };
 
 export type OnboardingStatus = PhotoStatus & { profile: Profile | null };
