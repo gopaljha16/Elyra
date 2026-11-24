@@ -38,6 +38,7 @@ model User {
   interests          String[]           @default([])
   personalityAnswers Json               @default("{}")
   preferences        Json               @default("{}")
+  dateActivities     String[]           @default([])
   embedding          Unsupported("vector(1536)")?
 
   // Account status
@@ -51,6 +52,10 @@ model User {
   matchesAsUser2     Match[]            @relation("User2Matches")
   feedbacks          Feedback[]
   verificationLogs   VerificationLog[]
+  blocksMade         UserBlock[]         @relation("BlocksMade")
+  blocksReceived     UserBlock[]         @relation("BlocksReceived")
+  reportsMade        UserReport[]        @relation("ReportsMade")
+  reportsReceived    UserReport[]        @relation("ReportsReceived")
 
   @@map("users")
 }
@@ -94,6 +99,10 @@ model Match {
   status             MatchStatus @default(PENDING)
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
+  pairKey            String?     @unique
+  requestedById      String?
+  acceptedByUser1    Boolean     @default(false)
+  acceptedByUser2    Boolean     @default(false)
 
   user1      User       @relation("User1Matches", fields: [user1Id], references: [id])
   user2      User       @relation("User2Matches", fields: [user2Id], references: [id])
@@ -119,6 +128,14 @@ model DatePlan {
   vibe        String
   location    String
   generatedAt DateTime @default(now())
+  activity    String?
+  venueId     String?
+  scheduledAt DateTime?
+  proposalVersion Int @default(0)
+  proposedById String?
+  acceptedByUser1 Boolean @default(false)
+  acceptedByUser2 Boolean @default(false)
+  status      String @default("DRAFT")
 
   match Match @relation(fields: [matchId], references: [id])
 
@@ -136,9 +153,33 @@ model Feedback {
   review         String?
   successScore   Float?
   createdAt      DateTime @default(now())
+  attended      Boolean?
+
+  @@unique([matchId, userId])
 
   match Match @relation(fields: [matchId], references: [id])
   user  User  @relation(fields: [userId], references: [id])
 
   @@map("feedbacks")
+}
+
+model UserBlock {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  blocker User @relation("BlocksMade", fields: [blockerId], references: [id])
+  blocked User @relation("BlocksReceived", fields: [blockedId], references: [id])
+  @@id([blockerId, blockedId])
+  @@map("user_blocks")
+}
+
+model UserReport {
+  id String @id @default(cuid())
+  reporterId String
+  subjectId String
+  reason String
+  createdAt DateTime @default(now())
+  reporter User @relation("ReportsMade", fields: [reporterId], references: [id])
+  subject User @relation("ReportsReceived", fields: [subjectId], references: [id])
+  @@map("user_reports")
 }

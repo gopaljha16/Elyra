@@ -6,6 +6,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { ApiError, lock, profileSchema } from "./profile.js";
 import { createStorage, validateProfilePhoto } from "./storage.js";
 import { photoLimit, photoTypes } from "./options.js";
+import { dateActivities } from "../dating/options.js";
 
 export type Storage = ReturnType<typeof createStorage>;
 export const photoPath = (clerkId: string, id: string) => `${clerkId}/photos/${id}`;
@@ -82,6 +83,18 @@ export function onboardingRoutes(db: PrismaClient, storage: Storage) {
       return tx.user.upsert({ where: { clerkId: id }, create: { clerkId: id, ...fields }, update: fields });
     });
     res.json(profileResponse(user));
+  });
+
+  router.put("/date-activities", async (req, res) => {
+    const activities = z.array(z.enum(dateActivities)).min(1).max(5).parse(req.body?.activities);
+    const id = clerkId(req);
+    const user = await db.$transaction(async (tx) => {
+      await lock(tx, id);
+      const current = await tx.user.findUnique({ where: { clerkId: id } });
+      if (!current?.isOnboarded) throw new ApiError(409, "Complete onboarding first.");
+      return tx.user.update({ where: { id: current.id }, data: { dateActivities: activities } });
+    });
+    res.json({ activities: user.dateActivities });
   });
 
   router.post("/photos/upload-url", async (req, res) => {

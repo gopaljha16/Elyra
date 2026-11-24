@@ -15,6 +15,7 @@ import { ApiError, createDatabase } from "./onboarding/profile.js";
 import { onboardingRoutes } from "./onboarding/routes.js";
 import { createStorage } from "./onboarding/storage.js";
 import { verificationRoutes } from "./onboarding/verification.js";
+import { datingRoutes } from "./dating/routes.js";
 
 const envSchema = z.object({
   NODE_ENV: z
@@ -70,6 +71,7 @@ app.use("/api/onboarding", verificationRoutes(db, storage, {
   adminIds: env.VERIFICATION_ADMIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
 }));
 app.use("/api/onboarding", onboardingRoutes(db, storage));
+app.use("/api/dating", datingRoutes(db));
 
 type AuthedRequest = Request & {
   auth?: ReturnType<typeof getAuth>;
