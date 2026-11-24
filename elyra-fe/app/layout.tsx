@@ -11,7 +11,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <ClerkProvider signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/">
-      <html lang="en"><body>{children}</body></html>
+      <html lang="en">
+        <body>{children}</body>
+      </html>
     </ClerkProvider>
   );
 }

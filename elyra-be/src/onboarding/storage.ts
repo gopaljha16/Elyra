@@ -4,11 +4,20 @@ import { ApiError } from "./profile.js";
 import { photoLimit, photoTypes } from "./options.js";
 
 const unavailable = "Photo upload service is temporarily unavailable. Please try again later.";
-const formats: Record<string, string> = { jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+const formats: Record<string, string> = {
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+};
 
 export async function validateImage(bytes: Buffer, allowed: readonly string[], maxBytes: number) {
-  if (bytes.length > maxBytes) throw new ApiError(413, maxBytes === photoLimit
-    ? "Each photo must be 5 MB or smaller." : "Image size exceeds maximum allowed");
+  if (bytes.length > maxBytes)
+    throw new ApiError(
+      413,
+      maxBytes === photoLimit
+        ? "Each photo must be 5 MB or smaller."
+        : "Image size exceeds maximum allowed",
+    );
   let format: string | undefined;
   try {
     format = (await sharp(bytes, { limitInputPixels: 25_000_000 }).metadata()).format;
@@ -29,7 +38,9 @@ export function createStorage(projectUrl: string, serviceKey: string, bucket: st
   const objectPath = (path: string) => path.split("/").map(encodeURIComponent).join("/");
   const url = (path: string) => root + "authenticated/" + bucketPath + "/" + objectPath(path);
   const signature = (userId: string, id: string, expires: number) =>
-    createHmac("sha256", serviceKey).update(JSON.stringify(["photo-upload", userId, id, expires])).digest();
+    createHmac("sha256", serviceKey)
+      .update(JSON.stringify(["photo-upload", userId, id, expires]))
+      .digest();
 
   async function request(path: string, init: RequestInit = {}) {
     try {
@@ -53,12 +64,19 @@ export function createStorage(projectUrl: string, serviceKey: string, bucket: st
     issue(userId: string, id: string) {
       const expires = Date.now() + 3_600_000;
       const token = signature(userId, id, expires).toString("hex");
-      return { uploadPath: `/api/onboarding/photos/${id}?expires=${expires}&signature=${token}`, expires };
+      return {
+        uploadPath: `/api/onboarding/photos/${id}?expires=${expires}&signature=${token}`,
+        expires,
+      };
     },
     check(userId: string, id: string, expires: number, token: unknown) {
-      return Number.isSafeInteger(expires) && expires >= Date.now() && typeof token === "string"
-        && /^[a-f0-9]{64}$/.test(token)
-        && timingSafeEqual(signature(userId, id, expires), Buffer.from(token, "hex"));
+      return (
+        Number.isSafeInteger(expires) &&
+        expires >= Date.now() &&
+        typeof token === "string" &&
+        /^[a-f0-9]{64}$/.test(token) &&
+        timingSafeEqual(signature(userId, id, expires), Buffer.from(token, "hex"))
+      );
     },
     async upload(path: string, bytes: Buffer, mime: string) {
       await request(bucketPath + "/" + objectPath(path), {
@@ -70,7 +88,10 @@ export function createStorage(projectUrl: string, serviceKey: string, bucket: st
     async download(objectUrl: string, userId: string) {
       if (!objectUrl.startsWith(url(`${userId}/`))) throw new ApiError(404, "Photo not found.");
       const result = await request(objectUrl.slice(root.length));
-      return { bytes: Buffer.from(await result.arrayBuffer()), mime: result.headers.get("content-type") };
+      return {
+        bytes: Buffer.from(await result.arrayBuffer()),
+        mime: result.headers.get("content-type"),
+      };
     },
     async remove(path: string) {
       await request(bucketPath, {
@@ -87,7 +108,9 @@ export async function validateProfilePhoto(bytes: Buffer) {
   try {
     // Decode the entire image and discard metadata, including GPS coordinates.
     const clean = await sharp(bytes, { limitInputPixels: 25_000_000 })
-      .rotate().resize(2048, 2048, { fit: "inside", withoutEnlargement: true }).toBuffer();
+      .rotate()
+      .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+      .toBuffer();
     if (clean.length > photoLimit) throw new ApiError(413, "Each photo must be 5 MB or smaller.");
     return { mime, clean };
   } catch (error) {

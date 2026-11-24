@@ -10,10 +10,20 @@ export default async function OnboardingPage() {
 
   let status: OnboardingStatus;
   try {
-    const response = await onboardingRequest("", await session.getToken(), { signal: AbortSignal.timeout(8_000) });
+    const response = await onboardingRequest("", await session.getToken(), {
+      signal: AbortSignal.timeout(8_000),
+    });
     status = await response.json();
   } catch {
-    return <Shell><h1>We couldn’t load your profile.</h1><p>Your progress is saved on this device.</p><a className="action" href="">Try again</a></Shell>;
+    return (
+      <Shell>
+        <h1>We couldn’t load your profile.</h1>
+        <p>Your progress is saved on this device.</p>
+        <a className="action" href="">
+          Try again
+        </a>
+      </Shell>
+    );
   }
   if (status.isOnboarded) redirect("/dashboard");
   return <Wizard key={session.userId} userId={session.userId} initial={status} />;

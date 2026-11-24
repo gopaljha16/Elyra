@@ -7,7 +7,11 @@ export function draftKey(userId: string) {
 }
 
 export function discardDraft(userId: string) {
-  try { localStorage.removeItem(draftKey(userId)); } catch { /* Storage may be restricted. */ }
+  try {
+    localStorage.removeItem(draftKey(userId));
+  } catch {
+    /* Storage may be restricted. */
+  }
 }
 
 export function ClearDraft({ userId }: { userId: string }) {
