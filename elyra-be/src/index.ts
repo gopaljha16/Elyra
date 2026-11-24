@@ -34,6 +34,7 @@ const envSchema = z.object({
   VERIFICATION_ADMIN_IDS: z.string().default(""),
   TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
+  GOOGLE_PLACES_API_KEY: z.string().default(""),
 });
 
 let env: z.infer<typeof envSchema>;
@@ -71,7 +72,7 @@ app.use("/api/onboarding", verificationRoutes(db, storage, {
   adminIds: env.VERIFICATION_ADMIN_IDS.split(",").map((id) => id.trim()).filter(Boolean),
 }));
 app.use("/api/onboarding", onboardingRoutes(db, storage));
-app.use("/api/dating", datingRoutes(db));
+app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY));
 
 type AuthedRequest = Request & {
   auth?: ReturnType<typeof getAuth>;

@@ -49,12 +49,16 @@ export function profileResponse(user: {
   primaryPhotoUrl: string | null;
   isOnboarded: boolean;
   verificationStatus: string;
+  dateActivities: string[];
+  location: string;
 } | null) {
   return {
     photos: (user?.profilePhotos ?? []).map((url) => ({ id: url.split("/").at(-1), url })),
     primaryPhotoId: user?.primaryPhotoUrl?.split("/").at(-1) ?? null,
     isOnboarded: user?.isOnboarded ?? false,
     verificationStatus: user?.verificationStatus ?? "UNVERIFIED",
+    dateActivities: user?.dateActivities ?? [],
+    location: user?.location ?? "",
   };
 }
 

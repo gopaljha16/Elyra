@@ -33,6 +33,10 @@ Upload links are signed by Elyra and require the issuing Clerk account. The API 
 
 The Gemini check considers visible spoof cues and compares the two faces. One still selfie cannot establish micro-movement or provide reliable liveness verification. `GEMINI_MODEL` selects the model available to your project.
 
+## Dating pilot
+
+Add `GOOGLE_PLACES_API_KEY` to the backend environment to enable real venue suggestions. The API queries Google Nearby Search only when a matched pair opens the venue picker or submits a proposal. Enable Places API (New) for the key. Both users set an approximate area through browser location access. The first release matches people in the same city whose age, gender and distance preferences fit both ways. Each user chooses up to five date activities on the dashboard. After both accept, the pair can propose a venue and time. The other participant must accept the current proposal version. Feedback is private to the submitting account. The map provider returns venue names and addresses on demand.
+
 ## Existing API routes
 
 - `GET /health` reports API health.
