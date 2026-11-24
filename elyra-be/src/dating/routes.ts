@@ -5,6 +5,8 @@ import { ApiError } from "../onboarding/profile.js";
 import { clerkId } from "../onboarding/routes.js";
 import { dateActivities } from "./options.js";
 import { nearbyVenues } from "./venues.js";
+import sharp from "sharp";
+import type { Storage } from "../onboarding/routes.js";
 
 const idBody = z.object({ userId: z.string().min(1) });
 const reportBody = idBody.extend({ reason: z.string().trim().min(5).max(500) });
@@ -87,7 +89,7 @@ function compatibility(a: User, b: User) {
   return common.interests.length * 2 + common.activities.length * 3 + personality;
 }
 
-export function datingRoutes(db: PrismaClient, placesKey = "") {
+export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage) {
   const router = Router();
   router.use((req, res, next) => {
     clerkId(req);
@@ -135,12 +137,18 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
         isActive: true,
         isOnboarded: true,
         verificationStatus: "VERIFIED",
+        liveVerifiedAt: { not: null },
         location: { equals: user.location, mode: "insensitive" },
       },
       take: 100,
     });
     const ranked = candidates
-      .filter((person) => fits(user, person) && fits(person, user))
+      .filter(
+        (person) =>
+          person.livePrimaryPhotoUrl === person.primaryPhotoUrl &&
+          fits(user, person) &&
+          fits(person, user),
+      )
       .map((person) => {
         const common = shared(user, person);
         return {
@@ -156,6 +164,36 @@ export function datingRoutes(db: PrismaClient, placesKey = "") {
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
     res.json({ candidates: ranked });
+  });
+
+  router.get("/people/:id/photo", async (req, res) => {
+    const user = await self(clerkId(req));
+    const other = await db.user.findUnique({ where: { id: String(req.params.id) } });
+    if (
+      !storage ||
+      !other?.primaryPhotoUrl ||
+      other.location.toLowerCase() !== user.location.toLowerCase() ||
+      !fits(user, other) ||
+      !fits(other, user)
+    )
+      throw new ApiError(404, "Photo unavailable.");
+    eligible(other);
+    const blocked = await db.userBlock.count({
+      where: {
+        OR: [
+          { blockerId: user.id, blockedId: other.id },
+          { blockerId: other.id, blockedId: user.id },
+        ],
+      },
+    });
+    if (blocked) throw new ApiError(404, "Photo unavailable.");
+    const { bytes } = await storage.download(other.primaryPhotoUrl, other.clerkId);
+    const thumbnail = await sharp(bytes)
+      .rotate()
+      .resize(320, 320, { fit: "cover" })
+      .webp({ quality: 65 })
+      .toBuffer();
+    res.set("Cache-Control", "private, max-age=60").type("image/webp").send(thumbnail);
   });
 
   router.post("/blocks", async (req, res) => {

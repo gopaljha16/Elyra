@@ -83,7 +83,7 @@ app.use(
   }),
 );
 app.use("/api/onboarding", onboardingRoutes(db, storage));
-app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY));
+app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY, storage));
 app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
 
 type AuthedRequest = Request & {

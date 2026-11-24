@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { endpoint, message } from "@/lib/onboarding";
 
@@ -33,6 +34,44 @@ type Match = {
 };
 type Venue = { id: string; name: string; address: string };
 const options = ["Coffee", "Bowling", "Arcade", "Museum", "Mall", "Walk"];
+
+function PersonPhoto({ id, name }: { id: string; name: string }) {
+  const { getToken } = useAuth();
+  const [source, setSource] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl = "";
+    async function load() {
+      const token = await getToken();
+      if (!token) return;
+      const response = await fetch(`${endpoint}/api/dating/people/${id}/photo`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      if (!response.ok || controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(await response.blob());
+      if (!controller.signal.aborted) setSource(objectUrl);
+      else URL.revokeObjectURL(objectUrl);
+    }
+    void load().catch(() => undefined);
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [getToken, id]);
+
+  return source ? (
+    <Image
+      unoptimized
+      className="person-photo"
+      src={source}
+      alt={`${name}'s profile photo`}
+      width={320}
+      height={320}
+    />
+  ) : null;
+}
 
 export function Dating({
   initialActivities,
@@ -225,6 +264,7 @@ export function Dating({
           <h2>Compatible people</h2>
           {candidates.map((person) => (
             <article className="dating-item" key={person.id}>
+              <PersonPhoto id={person.id} name={person.name} />
               <strong>
                 {person.name}, {person.age}
               </strong>
@@ -252,6 +292,7 @@ export function Dating({
       {matches.length === 0 && <p>Invitations and matches will appear here.</p>}
       {matches.map((match) => (
         <article className="dating-item" key={match.id}>
+          <PersonPhoto id={match.person.id} name={match.person.name} />
           <strong>
             {match.person.name}, {match.person.age}
           </strong>
