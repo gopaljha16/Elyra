@@ -7,9 +7,12 @@ import {
   ArrowLeft,
   ArrowRight,
   ImagePlus,
+  Loader2,
   RefreshCw,
+  Sparkles,
   Star,
   Trash2,
+  X,
 } from "lucide-react";
 import { photoLimit, photoTypes } from "../../../../elyra-be/src/onboarding/options";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -18,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { json, message, type Api, type PhotoStatus } from "@/lib/onboarding";
 
 type Pending = { file: File; id: string; uploadPath?: string };
+type PhotoTip = { rating: "great" | "good" | "needs_work"; summary: string; tips: string[] };
 
 async function compressPhoto(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file);
@@ -106,6 +110,28 @@ export function PhotoStep({
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
+  const [tips, setTips] = useState<Record<string, PhotoTip>>({});
+  const [tipLoadingId, setTipLoadingId] = useState<string | null>(null);
+  const [activeTipId, setActiveTipId] = useState<string | null>(null);
+
+  async function requestTips(id: string) {
+    if (tips[id]) {
+      setActiveTipId((current) => (current === id ? null : id));
+      return;
+    }
+    setTipLoadingId(id);
+    setErrors([]);
+    try {
+      const response = await api(`/photos/${id}/suggestions`, { method: "POST" });
+      const data = (await response.json()) as PhotoTip;
+      setTips((previous) => ({ ...previous, [id]: data }));
+      setActiveTipId(id);
+    } catch (error) {
+      setErrors([message(error)]);
+    } finally {
+      setTipLoadingId(null);
+    }
+  }
 
   async function upload(list: Pending[], initialErrors: string[] = []) {
     if (!list.length) {
@@ -215,15 +241,31 @@ export function PhotoStep({
                     Make primary
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => change(`/photos/${id}`, "DELETE")}
-                  aria-label={`Remove photo ${index + 1}`}
-                  className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    disabled={busy || tipLoadingId === id}
+                    onClick={() => void requestTips(id)}
+                    aria-label={`Get AI tips for photo ${index + 1}`}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-primary hover:bg-secondary/80 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {tipLoadingId === id ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-3" />
+                    )}
+                    <span>AI tips</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => change(`/photos/${id}`, "DELETE")}
+                    aria-label={`Remove photo ${index + 1}`}
+                    className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
               </div>
             </article>
           );
@@ -237,6 +279,46 @@ export function PhotoStep({
           </article>
         ))}
       </div>
+
+      {activeTipId && tips[activeTipId] && (
+        <div className="rounded-2xl border border-border bg-secondary/35 p-4 space-y-2.5 animate-in fade-in-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary shrink-0" />
+              <span className="text-sm font-semibold text-foreground">AI Photo Feedback</span>
+              <Badge
+                variant={
+                  tips[activeTipId].rating === "great"
+                    ? "success"
+                    : tips[activeTipId].rating === "good"
+                      ? "secondary"
+                      : "warning"
+                }
+              >
+                {tips[activeTipId].rating === "great"
+                  ? "Great"
+                  : tips[activeTipId].rating === "good"
+                    ? "Good"
+                    : "Needs work"}
+              </Badge>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTipId(null)}
+              aria-label="Close AI feedback"
+              className="rounded-full p-1 text-muted-foreground hover:bg-card cursor-pointer"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <p className="text-sm text-foreground leading-relaxed">{tips[activeTipId].summary}</p>
+          <ul className="list-disc pl-5 space-y-1 text-xs text-muted-foreground">
+            {tips[activeTipId].tips.map((tip, idx) => (
+              <li key={idx}>{tip}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!pending.length && status.photos.length < 5 && (
         <label

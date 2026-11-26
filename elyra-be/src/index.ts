@@ -83,7 +83,13 @@ app.use(
       .filter(Boolean),
   }),
 );
-app.use("/api/onboarding", onboardingRoutes(db, storage));
+app.use(
+  "/api/onboarding",
+  onboardingRoutes(db, storage, {
+    geminiKey: env.GEMINI_API_KEY,
+    geminiModel: env.GEMINI_MODEL,
+  }),
+);
 app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY, storage));
 app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
 app.use(

@@ -4,6 +4,7 @@ import { getAuth } from "@clerk/express";
 import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { ApiError, lock, profileSchema } from "./profile.js";
+import { createPhotoAdvisor } from "./gemini.js";
 import { createStorage, validateProfilePhoto } from "./storage.js";
 import { photoLimit, photoTypes } from "./options.js";
 import { dateActivities } from "../dating/options.js";
@@ -69,8 +70,13 @@ export function profileResponse(
   };
 }
 
-export function onboardingRoutes(db: PrismaClient, storage: Storage) {
+export function onboardingRoutes(
+  db: PrismaClient,
+  storage: Storage,
+  ai?: { geminiKey: string; geminiModel: string },
+) {
   const router = Router();
+  const advisePhoto = ai ? createPhotoAdvisor(ai.geminiKey, ai.geminiModel) : null;
   router.use((req, res, next) => {
     clerkId(req);
     res.set("Cache-Control", "no-store");
@@ -159,6 +165,18 @@ export function onboardingRoutes(db: PrismaClient, storage: Storage) {
     if (!user?.profilePhotos.includes(url)) throw new ApiError(404, "Photo not found.");
     const { bytes, mime } = await storage.download(url, id);
     res.type(mime ?? "application/octet-stream").send(bytes);
+  });
+
+  router.post("/photos/:id/suggestions", async (req, res) => {
+    if (!advisePhoto) throw new ApiError(503, "AI photo suggestions are not configured.");
+    const id = clerkId(req);
+    const photo = photoId.parse(req.params.id);
+    const url = storage.url(photoPath(id, photo));
+    const user = await db.user.findUnique({ where: { clerkId: id } });
+    if (!user?.profilePhotos.includes(url)) throw new ApiError(404, "Photo not found.");
+    const { bytes } = await storage.download(url, id);
+    const suggestion = await advisePhoto(bytes, user.primaryPhotoUrl === url);
+    res.json(suggestion);
   });
 
   router.patch("/photos/:id/primary", async (req, res) => {
