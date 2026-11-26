@@ -110,6 +110,7 @@ export function BrowserLiveness({
   const [generation, setGeneration] = useState(0);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [activeDeviceId, setActiveDeviceId] = useState("");
   const [step, setStep] = useState<Step>("center");
   const [hint, setHint] = useState("Starting your camera…");
   const [cameraError, setCameraError] = useState(false);
@@ -137,6 +138,7 @@ export function BrowserLiveness({
         }
         node.srcObject = stream;
         await node.play();
+        if (stopped) return;
 
         if (navigator.mediaDevices?.enumerateDevices) {
           const allDevices = await navigator.mediaDevices.enumerateDevices();
@@ -145,106 +147,136 @@ export function BrowserLiveness({
             setDevices(videoInputs);
             const activeTrack = stream.getVideoTracks()[0];
             const activeId = activeTrack?.getSettings()?.deviceId;
-            if (activeId && !selectedDeviceId) setSelectedDeviceId(activeId);
+            if (activeId) setActiveDeviceId(activeId);
           }
         }
 
+        setHint("Loading face detection…");
         const faceapi = await loadModels();
         if (stopped) return;
+        const detectorOptions = new faceapi.TinyFaceDetectorOptions({
+          inputSize: 224,
+          scoreThreshold: 0.45,
+        });
         setHint("Position your face inside the oval");
 
         const inspect = async () => {
-          if (stopped || !node.videoWidth || currentStep === "submitting") return;
-          const brightness = measureBrightness(node, sample);
-          const detections = await faceapi
-            .detectAllFaces(node, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.45 }))
-            .withFaceLandmarks(true);
-          if (stopped) return;
+          if (stopped || currentStep === "submitting") return;
+          try {
+            if (node.readyState < 2 || !node.videoWidth) {
+              timer = setTimeout(inspect, 160);
+              return;
+            }
+            const brightness = measureBrightness(node, sample);
+            const detections = await faceapi
+              .detectAllFaces(node, detectorOptions)
+              .withFaceLandmarks(true);
+            if (stopped) return;
 
-          if (brightness < 42) {
-            stepStableCount = 0;
-            setHint("Move to brighter lighting");
-          } else if (brightness > 238) {
-            stepStableCount = 0;
-            setHint("Avoid direct glare behind you");
-          } else if (detections.length === 0) {
-            stepStableCount = 0;
-            setHint("Show your face clearly in the oval");
-          } else if (detections.length > 1) {
-            stepStableCount = 0;
-            setHint("Make sure only you are in frame");
-          } else {
-            const { detection, landmarks } = detections[0];
-            const { box } = detection;
-            const centered =
-              Math.abs(box.x + box.width / 2 - node.videoWidth / 2) < node.videoWidth * 0.25 &&
-              Math.abs(box.y + box.height / 2 - node.videoHeight / 2) < node.videoHeight * 0.28;
-
-            if (box.width < node.videoWidth * 0.14) {
+            if (brightness < 38) {
               stepStableCount = 0;
-              setHint("Move a little closer");
-            } else if (!centered) {
+              setHint("Move to brighter lighting");
+            } else if (brightness > 238) {
               stepStableCount = 0;
-              setHint("Center your face in the oval");
+              setHint("Avoid direct glare behind you");
+            } else if (detections.length === 0) {
+              stepStableCount = 0;
+              setHint("Show your face clearly in the oval");
+            } else if (detections.length > 1) {
+              stepStableCount = 0;
+              setHint("Make sure only you are in frame");
             } else {
-              const yaw = yawRatio(landmarks.positions);
-              if (currentStep === "center") {
-                if (yaw <= 0.14) {
-                  stepStableCount += 1;
-                  setHint("Hold still…");
-                  if (stepStableCount >= 3) {
-                    currentStep = "turn";
+              const { detection, landmarks } = detections[0];
+              const { box } = detection;
+              const centered =
+                Math.abs(box.x + box.width / 2 - node.videoWidth / 2) < node.videoWidth * 0.25 &&
+                Math.abs(box.y + box.height / 2 - node.videoHeight / 2) < node.videoHeight * 0.28;
+
+              if (box.width < node.videoWidth * 0.14) {
+                stepStableCount = 0;
+                setHint("Move a little closer");
+              } else if (!centered) {
+                stepStableCount = 0;
+                setHint("Center your face in the oval");
+              } else {
+                const yaw = yawRatio(landmarks.positions);
+                if (currentStep === "center") {
+                  if (yaw <= 0.14) {
+                    stepStableCount += 1;
+                    setHint("Hold still…");
+                    if (stepStableCount >= 3) {
+                      currentStep = "turn";
+                      stepStableCount = 0;
+                      setStep("turn");
+                      setHint("Slowly turn your head slightly left or right");
+                    }
+                  } else {
                     stepStableCount = 0;
-                    setStep("turn");
-                    setHint("Slowly turn your head slightly left or right");
+                    setHint("Look straight at the camera");
                   }
-                } else {
-                  stepStableCount = 0;
-                  setHint("Look straight at the camera");
-                }
-              } else if (currentStep === "turn") {
-                if (yaw >= 0.14) {
-                  stepStableCount += 1;
-                  setHint("Great, now look straight back at the camera");
-                  if (stepStableCount >= 2) {
-                    currentStep = "hold";
+                } else if (currentStep === "turn") {
+                  if (yaw >= 0.14) {
+                    stepStableCount += 1;
+                    setHint("Great, now look straight back at the camera");
+                    if (stepStableCount >= 2) {
+                      currentStep = "hold";
+                      stepStableCount = 0;
+                      setStep("hold");
+                      setHint("Look straight and hold still…");
+                    }
+                  } else {
+                    setHint("Turn your head slightly left or right");
+                  }
+                } else if (currentStep === "hold") {
+                  if (yaw <= 0.12) {
+                    stepStableCount += 1;
+                    setHint("Capturing…");
+                    if (stepStableCount >= 2) {
+                      currentStep = "submitting";
+                      setStep("submitting");
+                      const blob = await captureFrame(node);
+                      await onCompleteRef.current(blob);
+                      return;
+                    }
+                  } else {
                     stepStableCount = 0;
-                    setStep("hold");
-                    setHint("Look straight and hold still…");
+                    setHint("Look straight at the camera");
                   }
-                } else {
-                  setHint("Turn your head slightly left or right");
-                }
-              } else if (currentStep === "hold") {
-                if (yaw <= 0.12) {
-                  stepStableCount += 1;
-                  setHint("Capturing…");
-                  if (stepStableCount >= 2) {
-                    currentStep = "submitting";
-                    setStep("submitting");
-                    const blob = await captureFrame(node);
-                    await onCompleteRef.current(blob);
-                    return;
-                  }
-                } else {
-                  stepStableCount = 0;
-                  setHint("Look straight at the camera");
                 }
               }
             }
+            timer = setTimeout(inspect, 160);
+          } catch (err) {
+            if (!stopped) {
+              console.error("Browser liveness inspection error:", err);
+              setCameraError(true);
+              setHint(
+                err instanceof Error ? err.message : "Face detection stopped. Retry camera.",
+              );
+            }
           }
-          timer = setTimeout(inspect, 160);
         };
 
         timer = setTimeout(inspect, 250);
       } catch (error) {
         if (!stopped) {
+          console.error("Browser liveness startup error:", error);
+          stream?.getTracks().forEach((track) => track.stop());
           setCameraError(true);
-          setHint(
-            error instanceof Error && error.message.includes("HTTPS")
-              ? error.message
-              : "Allow camera access in your browser to continue.",
-          );
+          if (
+            error instanceof Error &&
+            (error.name === "NotAllowedError" || error.name === "PermissionDeniedError")
+          ) {
+            setHint("Allow camera access in your browser to continue.");
+          } else if (error instanceof Error && error.name === "NotReadableError") {
+            setHint("Camera is busy in another app or tab. Close it and retry.");
+          } else {
+            setHint(
+              error instanceof Error && error.message
+                ? error.message
+                : "Could not start live verification.",
+            );
+          }
         }
       }
     }
@@ -271,7 +303,7 @@ export function BrowserLiveness({
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground shrink-0">Camera:</span>
           <Select
-            value={selectedDeviceId}
+            value={selectedDeviceId || activeDeviceId}
             onValueChange={(value) => {
               setSelectedDeviceId(value);
               setStep("center");
