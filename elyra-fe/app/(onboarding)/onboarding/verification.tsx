@@ -2,6 +2,10 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { AlertCircle, ArrowLeft, Camera as CameraIcon, Loader2, RefreshCw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { message, RequestError, type Api, type Attempt } from "@/lib/onboarding";
 import { Camera } from "./camera";
 
@@ -112,92 +116,127 @@ export function Verification({
   const exhausted = attempt?.remaining === 0;
   const pending = Boolean(attempt?.pending);
   const blocked = exhausted || pending || retryAt > 0;
+
   return (
-    <>
-      <h1>Verify it is you</h1>
-      <p>
-        Take a clear selfie in good light. When you submit it, Elyra sends your selfie and primary
-        photo to Google Gemini for comparison.
-      </p>
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <h1 className="font-serif text-3xl sm:text-5xl font-medium leading-[1.06] tracking-tight text-foreground">
+          Verify it is you
+        </h1>
+        <p className="text-base text-muted-foreground leading-relaxed">
+          Take a clear selfie in good light. When you submit it, Elyra securely compares your selfie
+          with your primary photo.
+        </p>
+      </div>
+
       {notice && (
-        <p className="notice" role="alert">
-          {notice}
+        <Alert variant="destructive">
+          <AlertCircle className="size-4 shrink-0 mt-0.5" />
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
+
+      {!attempt && !notice && (
+        <p className="text-sm text-muted-foreground flex items-center gap-2" role="status">
+          <Loader2 className="size-4 animate-spin text-primary" />
+          <span>Checking verification status...</span>
         </p>
       )}
-      {!attempt && !notice && <p role="status">Checking verification status...</p>}
+
       {!attempt && notice && (
-        <button
-          className="outline"
+        <Button
+          variant="outline"
           onClick={() => {
             setNotice("");
             setReload((n) => n + 1);
           }}
         >
-          Check again
-        </button>
+          <RefreshCw className="size-4" />
+          <span>Check again</span>
+        </Button>
       )}
+
       {pending && (
-        <p role="status">
-          Your verification is in progress. You can leave this page and come back.
-        </p>
+        <Alert>
+          <Loader2 className="size-4 animate-spin text-primary shrink-0 mt-0.5" />
+          <AlertDescription role="status">
+            Your verification is in progress. You can leave this page and come back.
+          </AlertDescription>
+        </Alert>
       )}
+
       {exhausted && !pending && (
-        <p>
+        <p className="text-sm text-muted-foreground">
           You have used all three attempts. Contact Elyra support or try again when an attempt
           becomes available.
         </p>
       )}
+
       {attempt && !pending && (
-        <p className="step-label" aria-live="polite">
+        <Badge variant="secondary" aria-live="polite">
           {attempt.remaining} {attempt.remaining === 1 ? "attempt" : "attempts"} available
-        </p>
+        </Badge>
       )}
+
       {attempt &&
         !blocked &&
         !selfie &&
         (closedCamera ? (
-          <button
-            className="action"
-            onClick={() => {
-              setNotice("");
-              setClosedCamera(false);
-              setRecapture((n) => n + 1);
-            }}
-          >
-            Try another selfie
-          </button>
+          <div>
+            <Button
+              onClick={() => {
+                setNotice("");
+                setClosedCamera(false);
+                setRecapture((n) => n + 1);
+              }}
+            >
+              <CameraIcon className="size-4" />
+              <span>Try another selfie</span>
+            </Button>
+          </div>
         ) : (
           <Camera
             key={recapture}
             onCapture={(file) => setSelfie({ file, preview: URL.createObjectURL(file) })}
           />
         ))}
+
       {selfie && (
-        <div>
-          <div className="viewfinder">
+        <div className="space-y-4">
+          <div className="relative grid place-items-center overflow-hidden aspect-[4/3] rounded-2xl bg-[#2e1924]">
             <Image
               unoptimized
               src={selfie.preview}
               alt="Your verification selfie"
               width={640}
               height={480}
+              className="size-full object-contain"
             />
           </div>
-          <div className="actions">
-            <button className="quiet" disabled={submitting} onClick={() => setSelfie(null)}>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-3">
+            <Button variant="ghost" disabled={submitting} onClick={() => setSelfie(null)}>
               Retake
-            </button>
-            <button className="action" disabled={submitting} onClick={submit}>
-              {submitting ? "Verifying..." : "Submit selfie"}
-            </button>
+            </Button>
+            <Button disabled={submitting} onClick={submit}>
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <span>Submit selfie</span>
+              )}
+            </Button>
           </div>
         </div>
       )}
-      <div className="actions">
-        <button className="quiet" disabled={submitting} onClick={onBack}>
-          Back to photos
-        </button>
+
+      <div className="flex justify-end pt-2">
+        <Button variant="ghost" disabled={submitting} onClick={onBack}>
+          <ArrowLeft className="size-4" />
+          <span>Back to photos</span>
+        </Button>
       </div>
-    </>
+    </div>
   );
 }

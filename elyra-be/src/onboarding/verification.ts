@@ -1,7 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { Router } from "express";
-import { createGemini, GeminiError, optimizeImage } from "./gemini.js";
+import { createVerifier, GeminiError, optimizeImage, type VisionConfig } from "./gemini.js";
 import { selfieLimit } from "./options.js";
 import { ApiError, lock, profileSchema } from "./profile.js";
 import { clerkId, editableUser, rawImage, staleAttempt, type Storage } from "./routes.js";
@@ -32,15 +32,14 @@ class RateError extends ApiError {
 }
 
 type VerificationConfig = {
-  geminiKey: string;
-  geminiModel: string;
+  vision: VisionConfig;
   ipHashKey: string;
   adminIds: string[];
 };
 
 export function verificationRoutes(db: PrismaClient, storage: Storage, config: VerificationConfig) {
   const router = Router({ mergeParams: true });
-  const analyze = createGemini(config.geminiKey, config.geminiModel);
+  const analyze = createVerifier(config.vision);
 
   router.use((_req, res, next) => {
     res.set("Cache-Control", "no-store");

@@ -2,10 +2,26 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  ImagePlus,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
 import { photoLimit, photoTypes } from "../../../../elyra-be/src/onboarding/options";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { json, message, type Api, type PhotoStatus } from "@/lib/onboarding";
 
 type Pending = { file: File; id: string; uploadPath?: string };
+type PhotoTip = { rating: "great" | "good" | "needs_work"; summary: string; tips: string[] };
 
 async function compressPhoto(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file);
@@ -57,12 +73,22 @@ function Preview({ api, id, file, alt }: { api?: Api; id?: string; file?: File; 
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [api, file, id]);
+
   return (
-    <div className="photo-preview">
+    <div className="grid place-items-center aspect-[4/5] bg-muted overflow-hidden">
       {url ? (
-        <Image unoptimized src={url} alt={alt} width={240} height={280} />
+        <Image
+          unoptimized
+          src={url}
+          alt={alt}
+          width={240}
+          height={280}
+          className="size-full object-cover"
+        />
       ) : (
-        <span>{failed ? "Preview unavailable" : "Loading photo…"}</span>
+        <span className="px-3 text-center text-xs text-muted-foreground">
+          {failed ? "Preview unavailable" : "Loading photo…"}
+        </span>
       )}
     </div>
   );
@@ -84,6 +110,28 @@ export function PhotoStep({
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [pending, setPending] = useState<Pending[]>([]);
+  const [tips, setTips] = useState<Record<string, PhotoTip>>({});
+  const [tipLoadingId, setTipLoadingId] = useState<string | null>(null);
+  const [activeTipId, setActiveTipId] = useState<string | null>(null);
+
+  async function requestTips(id: string) {
+    if (tips[id]) {
+      setActiveTipId((current) => (current === id ? null : id));
+      return;
+    }
+    setTipLoadingId(id);
+    setErrors([]);
+    try {
+      const response = await api(`/photos/${id}/suggestions`, { method: "POST" });
+      const data = (await response.json()) as PhotoTip;
+      setTips((previous) => ({ ...previous, [id]: data }));
+      setActiveTipId(id);
+    } catch (error) {
+      setErrors([message(error)]);
+    } finally {
+      setTipLoadingId(null);
+    }
+  }
 
   async function upload(list: Pending[], initialErrors: string[] = []) {
     if (!list.length) {
@@ -158,51 +206,132 @@ export function PhotoStep({
   }
 
   return (
-    <>
-      <h1>Add your photos</h1>
-      <p>Choose 2 to 5 recent photos. Use JPEG, PNG, or WebP, up to 5 MB each.</p>
-      <div className="photo-grid">
-        {status.photos.map(({ id }, index) => (
-          <article className="photo-item" key={id}>
-            <Preview api={api} id={id} alt={`Profile photo ${index + 1}`} />
-            <div className="photo-controls">
-              {status.primaryPhotoId === id ? (
-                <strong>Primary</strong>
-              ) : (
-                <button
-                  className="quiet"
-                  disabled={busy}
-                  onClick={() => change(`/photos/${id}/primary`, "PATCH")}
-                >
-                  Make primary
-                </button>
-              )}
-              <button
-                className="quiet"
-                disabled={busy}
-                onClick={() => change(`/photos/${id}`, "DELETE")}
-                aria-label={`Remove photo ${index + 1}`}
-              >
-                Remove
-              </button>
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <h1 className="font-serif text-3xl sm:text-5xl font-medium leading-[1.06] tracking-tight text-foreground">
+          Add your photos
+        </h1>
+        <p className="text-base text-muted-foreground leading-relaxed">
+          Choose 2 to 5 recent photos. Use JPEG, PNG, or WebP, up to 5 MB each.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {status.photos.map(({ id }, index) => {
+          const isPrimary = status.primaryPhotoId === id;
+          return (
+            <article
+              key={id}
+              className="group overflow-hidden rounded-xl border border-border bg-card shadow-xs transition-shadow hover:shadow-md"
+            >
+              <Preview api={api} id={id} alt={`Profile photo ${index + 1}`} />
+              <div className="flex flex-wrap items-center justify-between gap-1 px-2 py-1.5 min-h-10 bg-card">
+                {isPrimary ? (
+                  <Badge variant="secondary" className="text-[11px] px-2 py-0.5 text-primary">
+                    <Star className="size-3 fill-primary text-primary" />
+                    Primary
+                  </Badge>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => change(`/photos/${id}/primary`, "PATCH")}
+                    className="text-xs font-semibold text-primary hover:underline px-1 py-1 cursor-pointer disabled:opacity-50"
+                  >
+                    Make primary
+                  </button>
+                )}
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    disabled={busy || tipLoadingId === id}
+                    onClick={() => void requestTips(id)}
+                    aria-label={`Get AI tips for photo ${index + 1}`}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-primary hover:bg-secondary/80 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {tipLoadingId === id ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="size-3" />
+                    )}
+                    <span>AI tips</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => change(`/photos/${id}`, "DELETE")}
+                    aria-label={`Remove photo ${index + 1}`}
+                    className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+        {pending.map(({ id, file }) => (
+          <article key={id} className="overflow-hidden rounded-xl border border-border bg-card">
+            <Preview file={file} alt={file.name} />
+            <div className="flex items-center justify-center px-2 py-2 text-xs font-medium text-muted-foreground">
+              {busy ? "Uploading…" : "Upload failed"}
             </div>
           </article>
         ))}
-        {pending.map(({ id, file }) => (
-          <article className="photo-item" key={id}>
-            <Preview file={file} alt={file.name} />
-            <span className="photo-controls">{busy ? "Uploading…" : "Upload failed"}</span>
-          </article>
-        ))}
       </div>
+
+      {activeTipId && tips[activeTipId] && (
+        <div className="rounded-2xl border border-border bg-secondary/35 p-4 space-y-2.5 animate-in fade-in-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary shrink-0" />
+              <span className="text-sm font-semibold text-foreground">AI Photo Feedback</span>
+              <Badge
+                variant={
+                  tips[activeTipId].rating === "great"
+                    ? "success"
+                    : tips[activeTipId].rating === "good"
+                      ? "secondary"
+                      : "warning"
+                }
+              >
+                {tips[activeTipId].rating === "great"
+                  ? "Great"
+                  : tips[activeTipId].rating === "good"
+                    ? "Good"
+                    : "Needs work"}
+              </Badge>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTipId(null)}
+              aria-label="Close AI feedback"
+              className="rounded-full p-1 text-muted-foreground hover:bg-card cursor-pointer"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <p className="text-sm text-foreground leading-relaxed">{tips[activeTipId].summary}</p>
+          <ul className="list-disc pl-5 space-y-1 text-xs text-muted-foreground">
+            {tips[activeTipId].tips.map((tip, idx) => (
+              <li key={idx}>{tip}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!pending.length && status.photos.length < 5 && (
-        <label className="upload">
-          <span aria-hidden="true">＋</span> Add photos
+        <label
+          className={`relative flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#ae8294] bg-card/50 px-4 py-6 text-sm font-semibold text-primary transition-colors hover:bg-secondary/40 focus-within:ring-3 focus-within:ring-ring/40 ${busy ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
+          <ImagePlus className="size-5" aria-hidden="true" />
+          <span>Add photos</span>
           <input
             type="file"
             accept={photoTypes.join(",")}
             multiple
             disabled={busy}
+            className="absolute inset-0 size-full cursor-pointer opacity-0"
             onChange={(e) => {
               void select(Array.from(e.currentTarget.files ?? []));
               e.currentTarget.value = "";
@@ -210,44 +339,57 @@ export function PhotoStep({
           />
         </label>
       )}
+
       {errors.length > 0 && (
-        <ul className="notice" role="alert">
-          {errors.map((error, index) => (
-            <li key={index}>{error}</li>
-          ))}
-        </ul>
+        <Alert variant="destructive">
+          <AlertCircle className="size-4 shrink-0 mt-0.5" />
+          <AlertDescription>
+            <ul className="list-disc pl-4 space-y-1">
+              {errors.map((error, index) => (
+                <li key={index}>{error}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
       )}
+
       {!!pending.length && !busy && (
-        <div className="actions">
-          <button
-            className="quiet"
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setPending([]);
               setErrors([]);
             }}
           >
             Clear failed uploads
-          </button>
-          <button className="outline" onClick={() => upload(pending)}>
-            Retry uploads
-          </button>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => upload(pending)}>
+            <RefreshCw className="size-3.5" />
+            <span>Retry uploads</span>
+          </Button>
         </div>
       )}
-      <p className="step-label" aria-live="polite">
+
+      <p className="text-xs font-semibold text-primary" aria-live="polite">
         {status.photos.length} of 5 photos uploaded
       </p>
-      <div className="actions">
-        <button className="quiet" disabled={busy} onClick={onBack}>
-          Back
-        </button>
-        <button
-          className="action"
+
+      <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-2">
+        <Button type="button" variant="ghost" disabled={busy} onClick={onBack}>
+          <ArrowLeft className="size-4" />
+          <span>Back</span>
+        </Button>
+        <Button
+          type="button"
           disabled={busy || status.photos.length < 2 || !status.primaryPhotoId}
           onClick={onNext}
         >
-          Continue
-        </button>
+          <span>Continue</span>
+          <ArrowRight className="size-4" />
+        </Button>
       </div>
-    </>
+    </div>
   );
 }

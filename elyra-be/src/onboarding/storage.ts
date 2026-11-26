@@ -104,15 +104,16 @@ export function createStorage(projectUrl: string, serviceKey: string, bucket: st
 }
 
 export async function validateProfilePhoto(bytes: Buffer) {
-  const mime = await validateImage(bytes, photoTypes, photoLimit);
+  await validateImage(bytes, photoTypes, photoLimit);
   try {
-    // Decode the entire image and discard metadata, including GPS coordinates.
+    // Decode the entire image, strip metadata (including GPS), and store as compressed WebP.
     const clean = await sharp(bytes, { limitInputPixels: 25_000_000 })
       .rotate()
-      .resize(2048, 2048, { fit: "inside", withoutEnlargement: true })
+      .resize(1280, 1280, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 82 })
       .toBuffer();
     if (clean.length > photoLimit) throw new ApiError(413, "Each photo must be 5 MB or smaller.");
-    return { mime, clean };
+    return { mime: "image/webp" as const, clean };
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(400, "Choose a readable image.");

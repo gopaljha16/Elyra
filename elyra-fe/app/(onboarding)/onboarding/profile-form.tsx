@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { ArrowLeft, ArrowRight, Check, Loader2 } from "lucide-react";
 import {
   answers,
   genders,
@@ -9,7 +10,19 @@ import {
   questions,
   relationships,
 } from "../../../../elyra-be/src/onboarding/options";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { Profile } from "@/lib/onboarding";
+import { cn } from "@/lib/utils";
 
 export type Form = Omit<Profile, "age" | "preferences"> & {
   age: string;
@@ -97,14 +110,18 @@ export function ProfileForm({
     if (!pref.relationship) errors.relationship = "Select a relationship type.";
   }
 
+  function markTouched(name: string) {
+    setTouched((previous) => (previous.includes(name) ? previous : [...previous, name]));
+  }
+
   function field(name: string, label: string, input: ReactNode) {
     const error = touched.includes(name) ? errors[name] : undefined;
     return (
-      <div className="field">
-        <label htmlFor={name}>{label}</label>
+      <div className="grid gap-1.5 min-w-0">
+        <Label htmlFor={name}>{label}</Label>
         {input}
         {error && (
-          <span id={`${name}-error`} className="field-error">
+          <span id={`${name}-error`} className="text-xs font-medium text-destructive">
             {error}
           </span>
         )}
@@ -119,8 +136,7 @@ export function ProfileForm({
       name,
       "aria-invalid": invalid || undefined,
       "aria-describedby": invalid ? `${name}-error` : undefined,
-      onBlur: () =>
-        setTouched((previous) => (previous.includes(name) ? previous : [...previous, name])),
+      onBlur: () => markTouched(name),
     };
   }
 
@@ -128,22 +144,18 @@ export function ProfileForm({
     update({ ...form, preferences: { ...pref, [key]: value } });
   }
 
-  function selectOptions(options: readonly string[]) {
-    return (
-      <>
-        <option value="">Select an option</option>
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </>
-    );
-  }
-
   return (
-    <>
-      <p className="step-label">Profile · Step {step + 1} of 4</p>
-      <h1>{headings[step]}</h1>
-      <p>{descriptions[step]}</p>
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-wider text-primary">
+          Profile · Step {step + 1} of 4
+        </p>
+        <h1 className="font-serif text-3xl sm:text-5xl font-medium leading-[1.06] tracking-tight text-foreground">
+          {headings[step]}
+        </h1>
+        <p className="text-base text-muted-foreground leading-relaxed">{descriptions[step]}</p>
+      </div>
+
       <form
         noValidate
         onSubmit={(event) => {
@@ -151,30 +163,32 @@ export function ProfileForm({
           if (!busy && !Object.keys(errors).length) onNext();
         }}
       >
-        <fieldset className="form-fields" disabled={busy} aria-label={headings[step]}>
+        <fieldset className="grid gap-4 min-w-0" disabled={busy} aria-label={headings[step]}>
           {step === 0 && (
             <>
               {field(
                 "name",
                 "Name",
-                <input
+                <Input
                   {...attributes("name")}
                   autoComplete="given-name"
                   maxLength={50}
+                  placeholder="Your first name"
                   value={form.name}
                   onChange={(e) => update({ ...form, name: e.target.value })}
                   required
                 />,
               )}
-              <div className="field-row">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {field(
                   "age",
                   "Age",
-                  <input
+                  <Input
                     {...attributes("age")}
                     type="number"
                     min={18}
                     max={100}
+                    placeholder="25"
                     value={form.age}
                     onChange={(e) => update({ ...form, age: e.target.value })}
                     required
@@ -183,55 +197,77 @@ export function ProfileForm({
                 {field(
                   "gender",
                   "Gender",
-                  <select
-                    {...attributes("gender")}
+                  <Select
                     value={form.gender}
-                    onChange={(e) => update({ ...form, gender: e.target.value })}
-                    required
+                    onValueChange={(value) => {
+                      markTouched("gender");
+                      update({ ...form, gender: value });
+                    }}
                   >
-                    {selectOptions(genders)}
-                  </select>,
+                    <SelectTrigger
+                      id="gender"
+                      onBlur={() => markTouched("gender")}
+                      aria-invalid={touched.includes("gender") && Boolean(errors.gender)}
+                      aria-describedby={
+                        touched.includes("gender") && errors.gender ? "gender-error" : undefined
+                      }
+                    >
+                      <SelectValue placeholder="Select an option" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {genders.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>,
                 )}
               </div>
               {field(
                 "location",
                 "Location",
-                <input
+                <Input
                   {...attributes("location")}
-                  placeholder="City or town"
+                  placeholder="City or neighborhood"
                   maxLength={120}
                   value={form.location}
                   onChange={(e) => update({ ...form, location: e.target.value })}
                   required
                 />,
               )}
-              {field(
-                "bio",
-                "Bio (optional)",
-                <textarea
-                  {...attributes("bio")}
-                  maxLength={500}
-                  rows={3}
-                  value={form.bio ?? ""}
-                  onChange={(e) => update({ ...form, bio: e.target.value })}
-                />,
-              )}
-              <small>{form.bio?.length ?? 0} / 500</small>
+              <div className="space-y-1.5">
+                {field(
+                  "bio",
+                  "Bio (optional)",
+                  <Textarea
+                    {...attributes("bio")}
+                    maxLength={500}
+                    rows={3}
+                    placeholder="A quick note on what you're into or what a great weekend looks like..."
+                    value={form.bio ?? ""}
+                    onChange={(e) => update({ ...form, bio: e.target.value })}
+                  />,
+                )}
+                <p className="text-xs text-muted-foreground text-right">
+                  {form.bio?.length ?? 0} / 500
+                </p>
+              </div>
             </>
           )}
+
           {step === 1 && (
-            <>
+            <div className="space-y-5">
               {Object.entries(interestGroups).map(([category, options]) => (
-                <fieldset className="interest-group" key={category}>
-                  <legend>{category}</legend>
-                  <div className="chips">
+                <fieldset className="space-y-2.5" key={category}>
+                  <legend className="text-sm font-semibold text-foreground">{category}</legend>
+                  <div className="flex flex-wrap gap-2">
                     {options.map((interest) => {
                       const selected = form.interests.includes(interest);
                       return (
                         <button
                           type="button"
                           key={interest}
-                          className="chip"
                           aria-pressed={selected}
                           disabled={!selected && form.interests.length >= 10}
                           onClick={() =>
@@ -242,56 +278,84 @@ export function ProfileForm({
                                 : [...form.interests, interest],
                             })
                           }
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-medium transition-all cursor-pointer active:scale-[0.97] disabled:opacity-45 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40",
+                            selected
+                              ? "border-primary bg-secondary text-primary font-semibold shadow-xs"
+                              : "border-input bg-card/60 text-foreground hover:bg-secondary/60 hover:border-primary/40",
+                          )}
                         >
-                          {interest}
+                          {selected && <Check className="size-3.5 shrink-0" />}
+                          <span>{interest}</span>
                         </button>
                       );
                     })}
                   </div>
                 </fieldset>
               ))}
-              <small aria-live="polite">
+              <p className="text-xs font-medium text-muted-foreground" aria-live="polite">
                 {form.interests.length} selected
                 {form.interests.length < 3 ? " · Choose at least 3" : " · Up to 10"}
-              </small>
-            </>
+              </p>
+            </div>
           )}
-          {step === 2 &&
-            (Object.keys(questions) as (keyof typeof questions)[]).map((key) => (
-              <fieldset className="interest-group" key={key}>
-                <legend>{questions[key]}</legend>
-                <div className="chips">
-                  {answers[key].map((answer) => (
-                    <label className="radio-chip" key={answer}>
-                      <input
-                        type="radio"
-                        name={key}
-                        value={answer}
-                        checked={form.personalityAnswers[key] === answer}
-                        onChange={() =>
-                          update({
-                            ...form,
-                            personalityAnswers: { ...form.personalityAnswers, [key]: answer },
-                          })
-                        }
-                      />
-                      <span>{answer}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            ))}
+
+          {step === 2 && (
+            <div className="space-y-5">
+              {(Object.keys(questions) as (keyof typeof questions)[]).map((key) => (
+                <fieldset className="space-y-2.5" key={key}>
+                  <legend className="text-sm font-semibold text-foreground">
+                    {questions[key]}
+                  </legend>
+                  <div className="flex flex-wrap gap-2">
+                    {answers[key].map((answer) => {
+                      const checked = form.personalityAnswers[key] === answer;
+                      return (
+                        <label
+                          key={answer}
+                          className={cn(
+                            "relative inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-medium transition-all cursor-pointer active:scale-[0.97] focus-within:ring-3 focus-within:ring-ring/40",
+                            checked
+                              ? "border-primary bg-secondary text-primary font-semibold shadow-xs"
+                              : "border-input bg-card/60 text-foreground hover:bg-secondary/60 hover:border-primary/40",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name={key}
+                            value={answer}
+                            checked={checked}
+                            className="sr-only"
+                            onChange={() =>
+                              update({
+                                ...form,
+                                personalityAnswers: { ...form.personalityAnswers, [key]: answer },
+                              })
+                            }
+                          />
+                          {checked && <Check className="size-3.5 shrink-0" />}
+                          <span>{answer}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ))}
+            </div>
+          )}
+
           {step === 3 && (
             <>
-              <div className="field-row">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {field(
                   "minAge",
                   "Minimum age",
-                  <input
+                  <Input
                     {...attributes("minAge")}
                     type="number"
                     min={18}
                     max={100}
+                    placeholder="21"
                     value={pref.minAge}
                     onChange={(e) => preferences("minAge", e.target.value)}
                     required
@@ -300,11 +364,12 @@ export function ProfileForm({
                 {field(
                   "maxAge",
                   "Maximum age",
-                  <input
+                  <Input
                     {...attributes("maxAge")}
                     type="number"
                     min={18}
                     max={100}
+                    placeholder="35"
                     value={pref.maxAge}
                     onChange={(e) => preferences("maxAge", e.target.value)}
                     required
@@ -314,23 +379,43 @@ export function ProfileForm({
               {field(
                 "matchGender",
                 "Who you’d like to meet",
-                <select
-                  {...attributes("matchGender")}
+                <Select
                   value={pref.gender}
-                  onChange={(e) => preferences("gender", e.target.value)}
-                  required
+                  onValueChange={(value) => {
+                    markTouched("matchGender");
+                    preferences("gender", value);
+                  }}
                 >
-                  {selectOptions(matchGenders)}
-                </select>,
+                  <SelectTrigger
+                    id="matchGender"
+                    onBlur={() => markTouched("matchGender")}
+                    aria-invalid={touched.includes("matchGender") && Boolean(errors.matchGender)}
+                    aria-describedby={
+                      touched.includes("matchGender") && errors.matchGender
+                        ? "matchGender-error"
+                        : undefined
+                    }
+                  >
+                    <SelectValue placeholder="Select an option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {matchGenders.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>,
               )}
               {field(
                 "maxDistance",
                 "Maximum distance (km)",
-                <input
+                <Input
                   {...attributes("maxDistance")}
                   type="number"
                   min={1}
                   max={20000}
+                  placeholder="25"
                   value={pref.maxDistance}
                   onChange={(e) => preferences("maxDistance", e.target.value)}
                   required
@@ -339,31 +424,58 @@ export function ProfileForm({
               {field(
                 "relationship",
                 "Looking for",
-                <select
-                  {...attributes("relationship")}
+                <Select
                   value={pref.relationship}
-                  onChange={(e) => preferences("relationship", e.target.value)}
-                  required
+                  onValueChange={(value) => {
+                    markTouched("relationship");
+                    preferences("relationship", value);
+                  }}
                 >
-                  {selectOptions(relationships)}
-                </select>,
+                  <SelectTrigger
+                    id="relationship"
+                    onBlur={() => markTouched("relationship")}
+                    aria-invalid={touched.includes("relationship") && Boolean(errors.relationship)}
+                    aria-describedby={
+                      touched.includes("relationship") && errors.relationship
+                        ? "relationship-error"
+                        : undefined
+                    }
+                  >
+                    <SelectValue placeholder="Select an option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {relationships.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>,
               )}
             </>
           )}
         </fieldset>
-        <div className="actions">
-          <button type="button" className="quiet" disabled={busy} onClick={onBack}>
-            Back
-          </button>
-          <button
-            type="submit"
-            className="action"
-            disabled={busy || Boolean(Object.keys(errors).length)}
-          >
-            {busy ? "Saving…" : "Continue"}
-          </button>
+
+        <div className="mt-7 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onBack}>
+            <ArrowLeft className="size-4" />
+            <span>Back</span>
+          </Button>
+          <Button type="submit" disabled={busy || Boolean(Object.keys(errors).length)}>
+            {busy ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                <span>Saving…</span>
+              </>
+            ) : (
+              <>
+                <span>Continue</span>
+                <ArrowRight className="size-4" />
+              </>
+            )}
+          </Button>
         </div>
       </form>
-    </>
+    </div>
   );
 }

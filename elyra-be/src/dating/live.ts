@@ -14,8 +14,8 @@ import { optimizeImage } from "../onboarding/gemini.js";
 
 export function liveRoutes(db: PrismaClient, storage: Storage, region: string, roleArn: string) {
   const router = Router();
-  const rekognition = new RekognitionClient({ region });
-  const sts = new STSClient({ region });
+  const rekognition = region ? new RekognitionClient({ region }) : null;
+  const sts = region ? new STSClient({ region }) : null;
   router.use((req, res, next) => {
     clerkId(req);
     res.set("Cache-Control", "no-store");
@@ -32,7 +32,8 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
 
   router.post("/sessions", async (req, res) => {
     const id = clerkId(req);
-    if (!region || !roleArn) throw new ApiError(503, "Live verification is not configured yet.");
+    if (!region || !roleArn || !rekognition || !sts)
+      throw new ApiError(503, "Live verification is not configured yet.");
     const reservationId = randomUUID();
     const user = await db.$transaction(async (tx) => {
       await lock(tx, `live:${id}`);
@@ -112,6 +113,7 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
 
   router.post("/sessions/:id/complete", async (req, res) => {
     const id = clerkId(req);
+    if (!rekognition) throw new ApiError(503, "Live verification is not configured yet.");
     const session = await db.liveSession.findUnique({
       where: { id: String(req.params.id) },
       include: { user: true },
