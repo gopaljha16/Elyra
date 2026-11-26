@@ -35,7 +35,7 @@ const envSchema = z.object({
     .regex(/^[a-z0-9.-]+$/)
     .default("gemini-3.5-flash-lite"),
   GROQ_API_KEY: z.string().min(1).optional(),
-  GROQ_MODEL: z.string().min(1).default("meta-llama/llama-4-scout-17b-16e-instruct"),
+  GROQ_MODEL: z.string().min(1).default("qwen/qwen3.8-27b"),
   VERIFICATION_ADMIN_IDS: z.string().default(""),
   TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
