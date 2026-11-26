@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { Camera as CameraIcon, RefreshCw } from "lucide-react";
 import { selfieLimit } from "../../../../elyra-be/src/onboarding/options";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 type FaceApi = typeof import("@vladmandic/face-api");
@@ -41,7 +48,7 @@ async function captureFrame(video: HTMLVideoElement) {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Couldn’t capture the selfie.");
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  for (const quality of [0.9, 0.8, 0.7, 0.55]) {
+  for (const quality of [0.92, 0.84, 0.72, 0.58]) {
     const jpeg = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", quality),
     );
@@ -50,9 +57,29 @@ async function captureFrame(video: HTMLVideoElement) {
   throw new Error("Couldn’t compress the selfie. Try again.");
 }
 
+async function openCameraStream(deviceId?: string) {
+  const videoConstraints: MediaTrackConstraints = deviceId
+    ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    : { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } };
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+  } catch (error) {
+    // Some desktop USB webcams reject facingMode or ideal resolution constraints.
+    if (
+      error instanceof Error &&
+      (error.name === "OverconstrainedError" || error.name === "NotFoundError")
+    ) {
+      return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
+    throw error;
+  }
+}
+
 export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [generation, setGeneration] = useState(0);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
   const [guidance, setGuidance] = useState("Starting your camera…");
   const [ready, setReady] = useState(false);
   const [cameraError, setCameraError] = useState(false);
@@ -70,10 +97,7 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
       try {
         if (!navigator.mediaDevices?.getUserMedia)
           throw new Error("Camera access requires HTTPS or localhost.");
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
-          audio: false,
-        });
+        stream = await openCameraStream(selectedDeviceId || undefined);
         if (stopped) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -81,11 +105,20 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
         node.srcObject = stream;
         await node.play();
         if (stopped) return;
+
+        if (navigator.mediaDevices.enumerateDevices) {
+          const all = await navigator.mediaDevices.enumerateDevices();
+          if (!stopped) {
+            const cams = all.filter((d) => d.kind === "videoinput");
+            setDevices(cams);
+          }
+        }
+
         setGuidance("Loading face detection…");
         const faceapi = await loadDetector();
         const options = new faceapi.TinyFaceDetectorOptions({
           inputSize: 224,
-          scoreThreshold: 0.5,
+          scoreThreshold: 0.45,
         });
         const failure = () => {
           if (stopped) return;
@@ -103,22 +136,22 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
               if (stopped) return;
               const faceWidth = faces[0]?.box.width ?? 0;
               const tip =
-                light < 48
+                light < 32
                   ? "Move somewhere brighter."
-                  : light > 218
+                  : light > 228
                     ? "Move away from bright light."
                     : faces.length > 1
                       ? "Only one person should be in the frame."
                       : faces.length === 0
                         ? "Center your face in the frame."
-                        : faceWidth < node.videoWidth * 0.17
+                        : faceWidth < node.videoWidth * 0.12
                           ? "Move a little closer."
                           : "Face detected. You’re ready to capture.";
               setReady(
-                light >= 48 &&
-                  light <= 218 &&
+                light >= 32 &&
+                  light <= 228 &&
                   faces.length === 1 &&
-                  faceWidth >= node.videoWidth * 0.17,
+                  faceWidth >= node.videoWidth * 0.12,
               );
               setGuidance(tip);
             } else setReady(false);
@@ -151,7 +184,7 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
       stream?.getTracks().forEach((track) => track.stop());
       if (node) node.srcObject = null;
     };
-  }, [generation]);
+  }, [generation, selectedDeviceId]);
 
   async function capture() {
     if (!video.current || !ready) return;
@@ -167,6 +200,29 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
 
   return (
     <div className="space-y-3">
+      {devices.length > 1 && (
+        <div className="flex items-center justify-end gap-2">
+          <Select
+            value={selectedDeviceId || devices[0]?.deviceId || ""}
+            onValueChange={(value) => {
+              setCameraError(false);
+              setSelectedDeviceId(value);
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-64 h-9 text-xs" aria-label="Select camera">
+              <SelectValue placeholder="Select camera" />
+            </SelectTrigger>
+            <SelectContent>
+              {devices.map((device, index) => (
+                <SelectItem key={device.deviceId || index} value={device.deviceId || String(index)}>
+                  {device.label || `Camera ${index + 1}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="relative grid place-items-center overflow-hidden aspect-[4/3] rounded-2xl bg-[#2e1924] shadow-inner">
         <video
           ref={video}
