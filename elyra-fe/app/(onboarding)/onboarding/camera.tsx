@@ -195,6 +195,7 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
       <div className="flex justify-end">
         {cameraError ? (
           <Button
+            type="button"
             variant="outline"
             onClick={() => {
               setCameraError(false);
@@ -206,7 +207,7 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
             <span>Restart camera</span>
           </Button>
         ) : (
-          <Button disabled={!ready || capturing} onClick={capture}>
+          <Button type="button" disabled={!ready || capturing} onClick={capture}>
             <CameraIcon className="size-4" />
             <span>Capture selfie</span>
           </Button>

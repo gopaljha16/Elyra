@@ -239,7 +239,9 @@ export function PhotoStep({
       </div>
 
       {!pending.length && status.photos.length < 5 && (
-        <label className="relative flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#ae8294] bg-card/50 px-4 py-6 text-sm font-semibold text-primary transition-colors hover:bg-secondary/40 focus-within:ring-3 focus-within:ring-ring/40">
+        <label
+          className={`relative flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#ae8294] bg-card/50 px-4 py-6 text-sm font-semibold text-primary transition-colors hover:bg-secondary/40 focus-within:ring-3 focus-within:ring-ring/40 ${busy ? "opacity-50 cursor-not-allowed" : ""}`}
+        >
           <ImagePlus className="size-5" aria-hidden="true" />
           <span>Add photos</span>
           <input
@@ -293,11 +295,12 @@ export function PhotoStep({
       </p>
 
       <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-2">
-        <Button variant="ghost" disabled={busy} onClick={onBack}>
+        <Button type="button" variant="ghost" disabled={busy} onClick={onBack}>
           <ArrowLeft className="size-4" />
           <span>Back</span>
         </Button>
         <Button
+          type="button"
           disabled={busy || status.photos.length < 2 || !status.primaryPhotoId}
           onClick={onNext}
         >

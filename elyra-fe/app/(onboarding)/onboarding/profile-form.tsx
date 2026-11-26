@@ -206,7 +206,11 @@ export function ProfileForm({
                   >
                     <SelectTrigger
                       id="gender"
+                      onBlur={() => markTouched("gender")}
                       aria-invalid={touched.includes("gender") && Boolean(errors.gender)}
+                      aria-describedby={
+                        touched.includes("gender") && errors.gender ? "gender-error" : undefined
+                      }
                     >
                       <SelectValue placeholder="Select an option" />
                     </SelectTrigger>
@@ -384,7 +388,13 @@ export function ProfileForm({
                 >
                   <SelectTrigger
                     id="matchGender"
+                    onBlur={() => markTouched("matchGender")}
                     aria-invalid={touched.includes("matchGender") && Boolean(errors.matchGender)}
+                    aria-describedby={
+                      touched.includes("matchGender") && errors.matchGender
+                        ? "matchGender-error"
+                        : undefined
+                    }
                   >
                     <SelectValue placeholder="Select an option" />
                   </SelectTrigger>
@@ -423,7 +433,13 @@ export function ProfileForm({
                 >
                   <SelectTrigger
                     id="relationship"
+                    onBlur={() => markTouched("relationship")}
                     aria-invalid={touched.includes("relationship") && Boolean(errors.relationship)}
+                    aria-describedby={
+                      touched.includes("relationship") && errors.relationship
+                        ? "relationship-error"
+                        : undefined
+                    }
                   >
                     <SelectValue placeholder="Select an option" />
                   </SelectTrigger>
