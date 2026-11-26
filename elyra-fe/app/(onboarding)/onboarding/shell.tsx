@@ -1,23 +1,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Check, LogOut } from "lucide-react";
+import { ElyraWordmark } from "@/components/elyra-wordmark";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-
-export function Brand() {
-  return (
-    <Link
-      href="/"
-      className="inline-flex items-center gap-1.5 font-serif text-2xl sm:text-3xl font-bold tracking-tight text-primary whitespace-nowrap transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 rounded-lg"
-    >
-      <span aria-hidden="true" className="text-lg sm:text-xl">
-        ✦
-      </span>
-      <span>Elyra</span>
-    </Link>
-  );
-}
 
 export function Shell({
   children,
@@ -43,7 +30,7 @@ export function Shell({
           size === "admin" ? "max-w-6xl" : "max-w-[930px]",
         )}
       >
-        <Brand />
+        <ElyraWordmark />
         <div className="flex items-center gap-2">
           {headerRight}
           {exit && (

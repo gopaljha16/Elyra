@@ -12,7 +12,11 @@ const day = 24 * hour;
 
 async function recentAttempts(tx: Prisma.TransactionClient, userId: string, now: Date) {
   return tx.verificationLog.findMany({
-    where: { userId, createdAt: { gt: new Date(+now - day) } },
+    where: {
+      userId,
+      createdAt: { gt: new Date(+now - day) },
+      OR: [{ status: "PENDING" }, { aiCheckPassed: { not: null } }],
+    },
     orderBy: { createdAt: "asc" },
     select: { createdAt: true, status: true, failureReason: true },
   });
@@ -135,6 +139,7 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
             user,
             profile: profile.data,
             primaryPhotoUrl: user.primaryPhotoUrl,
+            attemptsUsed: attempts.length,
             remaining: 2 - attempts.length,
             retryAfter:
               attempts.length === 2 ? retrySeconds(attempts[0].createdAt, day, now) : null,
@@ -178,6 +183,7 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
         }
 
         const status = failure ? "REJECTED" : "VERIFIED";
+        const aiCheckPassed = serviceError ? null : !failure;
         const persistResult = () =>
           db.$transaction(async (tx) => {
             await lock(tx, id);
@@ -185,7 +191,7 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
               where: { id: attemptId, status: "PENDING" },
               data: {
                 status,
-                aiCheckPassed: !failure,
+                aiCheckPassed,
                 aiReason: JSON.stringify(rawResponse),
                 failureReason: failure,
               },
@@ -200,8 +206,8 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
               where: { id: attempt.user.id },
               data: {
                 ...(failure ? {} : { ...attempt.profile, bio: attempt.profile.bio || null }),
-                verificationStatus: status,
-                verificationNote: failure,
+                verificationStatus: serviceError ? "UNVERIFIED" : status,
+                verificationNote: serviceError ? null : failure,
                 verificationSelfieUrl: selfieStored ? selfieUrl : undefined,
                 isOnboarded: !failure,
                 verifiedAt: failure ? null : new Date(),
@@ -219,8 +225,8 @@ export function verificationRoutes(db: PrismaClient, storage: Storage, config: V
           res.status(serviceError.status).json({
             error: serviceError.message,
             reason: failure,
-            remaining: attempt.remaining,
-            retryAfter: attempt.retryAfter,
+            remaining: Math.max(0, 3 - attempt.attemptsUsed),
+            retryAfter: null,
           });
           return;
         }

@@ -1,10 +1,10 @@
 import { SignIn } from "@clerk/nextjs";
-import { Brand } from "@/app/(onboarding)/onboarding/shell";
+import { ElyraWordmark } from "@/components/elyra-wordmark";
 
 export default function Page() {
   return (
     <main className="elyra-ambient flex min-h-dvh flex-col items-center justify-center px-4 py-10 gap-6">
-      <Brand />
+      <ElyraWordmark />
       <SignIn
         appearance={{
           variables: {

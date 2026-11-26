@@ -1,0 +1,33 @@
+.wordmark {
+  --wordmark-accent: #a32f49;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  gap: 0.35rem;
+  color: #2c1820;
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 2.15rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.1em;
+  white-space: nowrap;
+}
+
+.wordmark:focus-visible {
+  outline: 2px solid var(--wordmark-accent);
+  outline-offset: 4px;
+}
+
+.heart,
+.period {
+  color: var(--wordmark-accent);
+}
+
+.heart {
+  flex: none;
+  transform: rotate(-14deg);
+}
+
+.period {
+  margin-left: -0.24rem;
+}

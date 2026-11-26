@@ -87,6 +87,7 @@ export function Verification({
     if (!selfie) return;
     setSubmitting(true);
     setNotice("");
+    let keepSelfie = false;
     try {
       const result: Attempt = await (
         await api("/verification", { method: "POST", body: selfie.file })
@@ -105,10 +106,15 @@ export function Verification({
           setAttempt((previous) => previous && { ...previous, remaining: error.remaining! });
         if (error.retryAfter) setRetryAt(Date.now() + error.retryAfter * 1000);
         if (error.status === 409) setReload((n) => n + 1);
+        keepSelfie = error.status >= 500 || error.status === 429;
+      } else {
+        keepSelfie = true;
       }
     } finally {
-      setSelfie(null);
-      setClosedCamera(true);
+      if (!keepSelfie) {
+        setSelfie(null);
+        setClosedCamera(true);
+      }
       setSubmitting(false);
     }
   }
