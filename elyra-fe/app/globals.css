@@ -1,14 +1,75 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-serif), Georgia, serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 12px);
+}
 
 :root {
   color-scheme: light;
+  --radius: 0.75rem;
+
+  /* Elyra warm editorial palette mapped to shadcn/ui tokens */
+  --background: #faf1eb;
+  --foreground: #2e1924;
+  --card: #fffaf7;
+  --card-foreground: #2e1924;
+  --popover: #fffaf7;
+  --popover-foreground: #2e1924;
+  --primary: #842b50;
+  --primary-foreground: #ffffff;
+  --secondary: #f4e0e7;
+  --secondary-foreground: #5c1c37;
+  --muted: #f3e6e4;
+  --muted-foreground: #66525e;
+  --accent: #f2dce6;
+  --accent-foreground: #2e1924;
+  --destructive: #a3323e;
+  --destructive-foreground: #ffffff;
+  --border: #e8d8dd;
+  --input: #cdaeb9;
+  --ring: #96505e;
+
+  /* Legacy tokens kept temporarily until Phase 6 cleanup */
   --ink: #2e1924;
   --soft: #66525e;
   --line: #e8d8dd;
   --paper: #fffaf7;
-  --primary: #842b50;
   --primary-hover: #67203e;
   --focus: #96505e;
+}
+
+.elyra-ambient {
+  background:
+    radial-gradient(ellipse at 12% 8%, rgba(244, 207, 201, 0.7), transparent 48%),
+    radial-gradient(ellipse at 94% 28%, rgba(235, 219, 230, 0.75), transparent 46%), #faf1eb;
 }
 
 body {
