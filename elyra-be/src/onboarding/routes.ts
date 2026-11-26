@@ -4,7 +4,7 @@ import { getAuth } from "@clerk/express";
 import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { ApiError, lock, profileSchema } from "./profile.js";
-import { createPhotoAdvisor } from "./gemini.js";
+import { createPhotoAdvisor, type VisionConfig } from "./gemini.js";
 import { createStorage, validateProfilePhoto } from "./storage.js";
 import { photoLimit, photoTypes } from "./options.js";
 import { dateActivities } from "../dating/options.js";
@@ -70,13 +70,9 @@ export function profileResponse(
   };
 }
 
-export function onboardingRoutes(
-  db: PrismaClient,
-  storage: Storage,
-  ai?: { geminiKey: string; geminiModel: string },
-) {
+export function onboardingRoutes(db: PrismaClient, storage: Storage, vision?: VisionConfig) {
   const router = Router();
-  const advisePhoto = ai ? createPhotoAdvisor(ai.geminiKey, ai.geminiModel) : null;
+  const advisePhoto = vision ? createPhotoAdvisor(vision) : null;
   router.use((req, res, next) => {
     clerkId(req);
     res.set("Cache-Control", "no-store");

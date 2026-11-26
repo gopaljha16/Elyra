@@ -29,11 +29,13 @@ const envSchema = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_SERVICE_KEY: z.string().min(1),
   SUPABASE_BUCKET: z.string().min(1).default("elyra-onboarding"),
-  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_API_KEY: z.string().min(1).optional(),
   GEMINI_MODEL: z
     .string()
     .regex(/^[a-z0-9.-]+$/)
     .default("gemini-3.5-flash-lite"),
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GROQ_MODEL: z.string().min(1).default("meta-llama/llama-4-scout-17b-16e-instruct"),
   VERIFICATION_ADMIN_IDS: z.string().default(""),
   TRUSTED_PROXIES: z.string().default(""),
   OPENAI_API_KEY: z.string().min(1).optional(),
@@ -72,24 +74,26 @@ app.use(express.json({ limit: "1mb" }));
 app.use(clerkMiddleware({ authorizedParties: [env.FRONTEND_URL] }));
 const db = createDatabase(env.DATABASE_URL);
 const storage = createStorage(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY, env.SUPABASE_BUCKET);
+const vision = env.GROQ_API_KEY
+  ? { provider: "groq" as const, apiKey: env.GROQ_API_KEY, model: env.GROQ_MODEL }
+  : env.GEMINI_API_KEY
+    ? { provider: "gemini" as const, apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL }
+    : undefined;
+if (!vision) {
+  console.error("Invalid environment variables: set GROQ_API_KEY or GEMINI_API_KEY");
+  process.exit(1);
+}
 app.use(
   "/api/onboarding",
   verificationRoutes(db, storage, {
-    geminiKey: env.GEMINI_API_KEY,
-    geminiModel: env.GEMINI_MODEL,
+    vision,
     ipHashKey: env.SUPABASE_SERVICE_KEY,
     adminIds: env.VERIFICATION_ADMIN_IDS.split(",")
       .map((id) => id.trim())
       .filter(Boolean),
   }),
 );
-app.use(
-  "/api/onboarding",
-  onboardingRoutes(db, storage, {
-    geminiKey: env.GEMINI_API_KEY,
-    geminiModel: env.GEMINI_MODEL,
-  }),
-);
+app.use("/api/onboarding", onboardingRoutes(db, storage, vision));
 app.use("/api/dating", datingRoutes(db, env.GOOGLE_PLACES_API_KEY, storage));
 app.use("/api/live", liveRoutes(db, storage, env.AWS_REGION, env.AWS_LIVENESS_STREAM_ROLE_ARN));
 app.use(

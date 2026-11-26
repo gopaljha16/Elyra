@@ -124,8 +124,8 @@ export function Verification({
           Verify it is you
         </h1>
         <p className="text-base text-muted-foreground leading-relaxed">
-          Take a clear selfie in good light. When you submit it, Elyra sends your selfie and primary
-          photo to Google Gemini for comparison.
+          Take a clear selfie in good light. When you submit it, Elyra securely compares your selfie
+          with your primary photo.
         </p>
       </div>
 
