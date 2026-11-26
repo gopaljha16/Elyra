@@ -1,6 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { UserButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
+import { AlertCircle, RefreshCw } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { onboardingRequest, type OnboardingStatus } from "@/lib/onboarding";
 import { Shell } from "../onboarding/shell";
 import { ClearDraft } from "../onboarding/draft-storage";
@@ -19,23 +22,40 @@ export default async function DashboardPage() {
   } catch {
     return (
       <Shell>
-        <h1>We could not load your dashboard.</h1>
-        <a className="action" href="">
-          Try again
-        </a>
+        <div className="space-y-5">
+          <Alert variant="destructive">
+            <AlertCircle className="size-4 shrink-0 mt-0.5" />
+            <AlertDescription>We could not load your dashboard right now.</AlertDescription>
+          </Alert>
+          <h1 className="font-serif text-3xl sm:text-4xl font-medium tracking-tight text-foreground">
+            Something interrupted your session.
+          </h1>
+          <div className="flex justify-end">
+            <Button asChild>
+              <a href="">
+                <RefreshCw className="size-4" />
+                <span>Try again</span>
+              </a>
+            </Button>
+          </div>
+        </div>
       </Shell>
     );
   }
   if (!status.isOnboarded) redirect("/onboarding");
 
   return (
-    <Shell>
+    <Shell size="wide" headerRight={<UserButton />}>
       <ClearDraft userId={session.userId} />
-      <div className="dashboard-heading">
-        <h1>Welcome{status.profile?.name ? `, ${status.profile.name}` : ""}.</h1>
-        <UserButton />
+      <div className="space-y-2 pb-6 border-b border-border/70">
+        <p className="text-xs font-bold uppercase tracking-wider text-primary">Your Elyra space</p>
+        <h1 className="font-serif text-3xl sm:text-5xl font-medium tracking-tight text-foreground">
+          Welcome{status.profile?.name ? `, ${status.profile.name}` : ""}.
+        </h1>
+        <p className="text-sm sm:text-base text-muted-foreground">
+          Your profile is set up and ready for real-world connections.
+        </p>
       </div>
-      <p>Your Elyra profile setup is complete.</p>
       <LiveCheck activities={status.dateActivities} location={status.location} />
     </Shell>
   );
