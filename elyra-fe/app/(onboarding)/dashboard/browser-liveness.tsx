@@ -21,6 +21,18 @@ let models: Promise<FaceApi> | undefined;
 function loadModels() {
   models ??= import("@vladmandic/face-api")
     .then(async (faceapi) => {
+      const tf = faceapi.tf as typeof faceapi.tf & {
+        setBackend?: (name: string) => Promise<boolean>;
+        ready?: () => Promise<void>;
+      };
+      if (tf?.setBackend) {
+        try {
+          await tf.setBackend("webgl");
+        } catch {
+          await tf.setBackend("cpu");
+        }
+      }
+      await tf?.ready?.();
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri("/face-model"),
         faceapi.nets.faceLandmark68TinyNet.loadFromUri("/face-model"),
