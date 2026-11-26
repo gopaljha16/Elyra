@@ -9,13 +9,24 @@ import {
 } from "@aws-sdk/client-rekognition";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { ApiError, lock } from "../onboarding/profile.js";
-import { clerkId, type Storage } from "../onboarding/routes.js";
-import { optimizeImage } from "../onboarding/gemini.js";
+import { clerkId, rawImage, type Storage } from "../onboarding/routes.js";
+import { createVerifier, optimizeImage, type VisionConfig } from "../onboarding/gemini.js";
+import { selfieLimit } from "../onboarding/options.js";
+import { validateImage } from "../onboarding/storage.js";
 
-export function liveRoutes(db: PrismaClient, storage: Storage, region: string, roleArn: string) {
+export function liveRoutes(
+  db: PrismaClient,
+  storage: Storage,
+  region: string,
+  roleArn: string,
+  vision?: VisionConfig,
+) {
   const router = Router();
   const rekognition = region ? new RekognitionClient({ region }) : null;
   const sts = region ? new STSClient({ region }) : null;
+  const awsEnabled = Boolean(region && roleArn && rekognition && sts);
+  const analyze = vision ? createVerifier(vision) : null;
+  const browserEnabled = Boolean(!awsEnabled && analyze);
   router.use((req, res, next) => {
     clerkId(req);
     res.set("Cache-Control", "no-store");
@@ -26,13 +37,14 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
     const user = await db.user.findUnique({ where: { clerkId: clerkId(req) } });
     res.json({
       verified: Boolean(user?.liveVerifiedAt && user.livePrimaryPhotoUrl === user.primaryPhotoUrl),
-      available: Boolean(region && roleArn),
+      available: awsEnabled || browserEnabled,
+      mode: awsEnabled ? "aws" : browserEnabled ? "browser" : null,
     });
   });
 
   router.post("/sessions", async (req, res) => {
     const id = clerkId(req);
-    if (!region || !roleArn || !rekognition || !sts)
+    if (!awsEnabled && !browserEnabled)
       throw new ApiError(503, "Live verification is not configured yet.");
     const reservationId = randomUUID();
     const user = await db.$transaction(async (tx) => {
@@ -54,9 +66,13 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
       });
       return current;
     });
+    if (browserEnabled) {
+      res.status(201).json({ sessionId: reservationId, mode: "browser" });
+      return;
+    }
     let sessionId: string;
     try {
-      const result = await rekognition.send(
+      const result = await rekognition!.send(
         new CreateFaceLivenessSessionCommand({
           ClientRequestToken: crypto.randomUUID(),
           Settings: { AuditImagesLimit: 0 },
@@ -75,7 +91,7 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
     await db.liveSession.update({ where: { id: reservationId }, data: { id: sessionId } });
     let credentials;
     try {
-      const result = await sts.send(
+      const result = await sts!.send(
         new AssumeRoleCommand({
           RoleArn: roleArn,
           RoleSessionName: `elyra-live-${user.id.slice(0, 12)}`,
@@ -101,6 +117,7 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
     }
     res.status(201).json({
       sessionId,
+      mode: "aws",
       region,
       credentials: {
         accessKeyId: credentials.AccessKeyId,
@@ -111,9 +128,10 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
     });
   });
 
-  router.post("/sessions/:id/complete", async (req, res) => {
+  router.post("/sessions/:id/complete", rawImage(selfieLimit - 1), async (req, res) => {
     const id = clerkId(req);
-    if (!rekognition) throw new ApiError(503, "Live verification is not configured yet.");
+    if (!awsEnabled && !browserEnabled)
+      throw new ApiError(503, "Live verification is not configured yet.");
     const session = await db.liveSession.findUnique({
       where: { id: String(req.params.id) },
       include: { user: true },
@@ -125,43 +143,62 @@ export function liveRoutes(db: PrismaClient, storage: Storage, region: string, r
     }
     if (Date.now() - +session.createdAt > 180_000)
       throw new ApiError(410, "Live session expired. Start again.");
-    let result;
-    try {
-      result = await rekognition.send(
-        new GetFaceLivenessSessionResultsCommand({ SessionId: session.id }),
-      );
-    } catch (error) {
-      console.error(
-        "Live result retrieval failed",
-        error instanceof Error ? error.name : "Unknown error",
-      );
-      throw new ApiError(503, "Live verification is temporarily unavailable.");
-    }
-    if (result.Status === "CREATED" || result.Status === "IN_PROGRESS")
-      throw new ApiError(409, "Live capture is still in progress.");
     let verified = false;
-    if (
-      result.Status === "SUCCEEDED" &&
-      (result.Confidence ?? 0) >= 90 &&
-      result.ReferenceImage?.Bytes
-    ) {
+    if (browserEnabled && analyze) {
+      if (!Buffer.isBuffer(req.body)) throw new ApiError(415, "Capture a JPEG or PNG selfie.");
+      await validateImage(req.body, ["image/jpeg", "image/png"], selfieLimit - 1);
+      const selfie = await optimizeImage(req.body);
       try {
         const photo = await storage.download(session.primaryPhotoUrl, id);
-        const optimized = await optimizeImage(photo.bytes);
-        const comparison = await rekognition.send(
-          new CompareFacesCommand({
-            SourceImage: { Bytes: result.ReferenceImage.Bytes },
-            TargetImage: { Bytes: optimized },
-            SimilarityThreshold: 90,
-          }),
-        );
-        verified = (comparison.FaceMatches ?? []).some((face) => (face.Similarity ?? 0) >= 90);
+        const profile = await optimizeImage(photo.bytes);
+        const result = await analyze(selfie, profile);
+        verified = !result.failure;
       } catch (error) {
+        if (error instanceof ApiError && error.status < 500) throw error;
         console.error(
-          "Live face comparison failed",
+          "Browser live verification failed",
           error instanceof Error ? error.name : "Unknown error",
         );
-        throw new ApiError(503, "Face comparison is temporarily unavailable.");
+        throw new ApiError(503, "Live verification is temporarily unavailable.");
+      }
+    } else {
+      let result;
+      try {
+        result = await rekognition!.send(
+          new GetFaceLivenessSessionResultsCommand({ SessionId: session.id }),
+        );
+      } catch (error) {
+        console.error(
+          "Live result retrieval failed",
+          error instanceof Error ? error.name : "Unknown error",
+        );
+        throw new ApiError(503, "Live verification is temporarily unavailable.");
+      }
+      if (result.Status === "CREATED" || result.Status === "IN_PROGRESS")
+        throw new ApiError(409, "Live capture is still in progress.");
+      if (
+        result.Status === "SUCCEEDED" &&
+        (result.Confidence ?? 0) >= 90 &&
+        result.ReferenceImage?.Bytes
+      ) {
+        try {
+          const photo = await storage.download(session.primaryPhotoUrl, id);
+          const optimized = await optimizeImage(photo.bytes);
+          const comparison = await rekognition!.send(
+            new CompareFacesCommand({
+              SourceImage: { Bytes: result.ReferenceImage.Bytes },
+              TargetImage: { Bytes: optimized },
+              SimilarityThreshold: 90,
+            }),
+          );
+          verified = (comparison.FaceMatches ?? []).some((face) => (face.Similarity ?? 0) >= 90);
+        } catch (error) {
+          console.error(
+            "Live face comparison failed",
+            error instanceof Error ? error.name : "Unknown error",
+          );
+          throw new ApiError(503, "Face comparison is temporarily unavailable.");
+        }
       }
     }
     await db.$transaction(async (tx) => {

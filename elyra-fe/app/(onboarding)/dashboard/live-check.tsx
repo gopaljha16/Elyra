@@ -8,32 +8,45 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { endpoint } from "@/lib/onboarding";
+import { BrowserLiveness } from "./browser-liveness";
 import { Dating } from "./dating";
 
-type Session = {
-  sessionId: string;
-  region: string;
-  credentials: {
-    accessKeyId: string;
-    secretAccessKey: string;
-    sessionToken: string;
-    expiration: string;
-  };
-};
+type Session =
+  | {
+      sessionId: string;
+      mode: "browser";
+    }
+  | {
+      sessionId: string;
+      mode?: "aws";
+      region: string;
+      credentials: {
+        accessKeyId: string;
+        secretAccessKey: string;
+        sessionToken: string;
+        expiration: string;
+      };
+    };
 
 export function LiveCheck({ activities, location }: { activities: string[]; location: string }) {
   const { getToken } = useAuth();
-  const [status, setStatus] = useState<{ verified: boolean; available: boolean } | null>(null);
+  const [status, setStatus] = useState<{
+    verified: boolean;
+    available: boolean;
+    mode?: "aws" | "browser" | null;
+  } | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function request(path: string, method = "GET") {
+  async function request(path: string, init?: RequestInit) {
     const token = await getToken();
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(`${endpoint}/api/live${path}`, {
-      method,
+      ...init,
       cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
+      headers,
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error ?? "Verification failed.");
@@ -61,7 +74,7 @@ export function LiveCheck({ activities, location }: { activities: string[]; loca
     setBusy(true);
     setError("");
     try {
-      setSession(await request("/sessions", "POST"));
+      setSession(await request("/sessions", { method: "POST" }));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Could not start verification.");
     } finally {
@@ -132,37 +145,63 @@ export function LiveCheck({ activities, location }: { activities: string[]; loca
 
         {session && (
           <div className="overflow-hidden rounded-2xl border border-border bg-card p-2 sm:p-4">
-            <FaceLivenessDetectorCore
-              sessionId={session.sessionId}
-              region={session.region}
-              config={{
-                credentialProvider: async () => ({
-                  accessKeyId: session.credentials.accessKeyId,
-                  secretAccessKey: session.credentials.secretAccessKey,
-                  sessionToken: session.credentials.sessionToken,
-                  expiration: new Date(session.credentials.expiration),
-                }),
-              }}
-              onAnalysisComplete={async () => {
-                try {
-                  const result = await request(`/sessions/${session.sessionId}/complete`, "POST");
+            {session.mode === "browser" ? (
+              <BrowserLiveness
+                onComplete={async (capture) => {
+                  try {
+                    const result = await request(`/sessions/${session.sessionId}/complete`, {
+                      method: "POST",
+                      headers: { "Content-Type": capture.type || "image/jpeg" },
+                      body: capture,
+                    });
+                    setSession(null);
+                    if (result.verified) setStatus({ verified: true, available: true, mode: "browser" });
+                    else
+                      setError(
+                        "We could not confirm the live face match. Check lighting and try again.",
+                      );
+                  } catch (failure) {
+                    setError(failure instanceof Error ? failure.message : "Verification failed.");
+                    setSession(null);
+                  }
+                }}
+                onCancel={() => setSession(null)}
+              />
+            ) : (
+              <FaceLivenessDetectorCore
+                sessionId={session.sessionId}
+                region={session.region}
+                config={{
+                  credentialProvider: async () => ({
+                    accessKeyId: session.credentials.accessKeyId,
+                    secretAccessKey: session.credentials.secretAccessKey,
+                    sessionToken: session.credentials.sessionToken,
+                    expiration: new Date(session.credentials.expiration),
+                  }),
+                }}
+                onAnalysisComplete={async () => {
+                  try {
+                    const result = await request(`/sessions/${session.sessionId}/complete`, {
+                      method: "POST",
+                    });
+                    setSession(null);
+                    if (result.verified) setStatus({ verified: true, available: true, mode: "aws" });
+                    else
+                      setError(
+                        "We could not confirm the live face match. Check lighting and try again.",
+                      );
+                  } catch (failure) {
+                    setError(failure instanceof Error ? failure.message : "Verification failed.");
+                    setSession(null);
+                  }
+                }}
+                onError={() => {
+                  setError("Live capture stopped. Start a new session to try again.");
                   setSession(null);
-                  if (result.verified) setStatus({ verified: true, available: true });
-                  else
-                    setError(
-                      "We could not confirm the live face match. Check lighting and try again.",
-                    );
-                } catch (failure) {
-                  setError(failure instanceof Error ? failure.message : "Verification failed.");
-                  setSession(null);
-                }
-              }}
-              onError={() => {
-                setError("Live capture stopped. Start a new session to try again.");
-                setSession(null);
-              }}
-              onUserCancel={() => setSession(null)}
-            />
+                }}
+                onUserCancel={() => setSession(null)}
+              />
+            )}
           </div>
         )}
       </div>
