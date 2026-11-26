@@ -3,6 +3,10 @@
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, ArrowRight, CheckCircle2, Sparkles } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   json,
   message,
@@ -83,17 +87,27 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
   if (done)
     return (
       <Shell>
-        <div className="success-mark" aria-hidden="true">
-          ✓
-        </div>
-        <h1>Your profile is ready.</h1>
-        <p>
-          Congratulations! Complete a live camera check on your dashboard before meeting people.
-        </p>
-        <div className="actions">
-          <Link className="action" href="/dashboard">
-            Go to dashboard
-          </Link>
+        <div className="space-y-5">
+          <div className="inline-flex size-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-800">
+            <CheckCircle2 className="size-6" aria-hidden="true" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="font-serif text-3xl sm:text-5xl font-medium tracking-tight text-foreground">
+              Your profile is ready.
+            </h1>
+            <p className="text-base text-muted-foreground leading-relaxed">
+              Congratulations! Complete a quick live camera check on your dashboard before meeting
+              people.
+            </p>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button size="lg" asChild>
+              <Link href="/dashboard">
+                <span>Go to dashboard</span>
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
       </Shell>
     );
@@ -101,7 +115,12 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
   if (!draft)
     return (
       <Shell>
-        <p role="status">Loading your setup...</p>
+        <div className="space-y-4" role="status" aria-label="Loading your setup">
+          <Skeleton className="h-3 w-full rounded-full" />
+          <Skeleton className="h-10 w-3/4" />
+          <Skeleton className="h-5 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
       </Shell>
     );
   const { stage, step, form } = draft;
@@ -149,18 +168,27 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
     <Shell exit={!busy}>
       <Progress stage={stage} />
       {stage === 0 && (
-        <>
-          <h1>Make room for a real connection.</h1>
-          <p>
-            Welcome to Elyra. Set up your profile, add a few photos, and verify your selfie before
-            you start meeting people.
-          </p>
-          <div className="actions">
-            <button className="action" onClick={() => navigate(1, 0)}>
-              Start setup
-            </button>
+        <div className="space-y-6">
+          <div className="inline-flex items-center gap-2 rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground">
+            <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
+            <span>Takes about 3 minutes</span>
           </div>
-        </>
+          <div className="space-y-3">
+            <h1 className="font-serif text-3xl sm:text-5xl font-medium leading-[1.06] tracking-tight text-foreground">
+              Make room for a real connection.
+            </h1>
+            <p className="text-base text-muted-foreground leading-relaxed">
+              Welcome to Elyra. Set up your profile, add a few photos, and verify your selfie before
+              you start meeting people.
+            </p>
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button size="lg" onClick={() => navigate(1, 0)}>
+              <span>Start setup</span>
+              <ArrowRight className="size-4" />
+            </Button>
+          </div>
+        </div>
       )}
       {stage === 1 && (
         <ProfileForm
@@ -187,9 +215,10 @@ export function Wizard({ userId, initial }: { userId: string; initial: Onboardin
       )}
       {stage === 3 && <Verification api={api} onBack={() => navigate(2)} onComplete={complete} />}
       {error && (
-        <p className="notice" role="alert">
-          {error}
-        </p>
+        <Alert variant="destructive" className="mt-5">
+          <AlertCircle className="size-4 shrink-0 mt-0.5" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
     </Shell>
   );

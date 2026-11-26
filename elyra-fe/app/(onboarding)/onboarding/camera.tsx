@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Camera as CameraIcon, RefreshCw } from "lucide-react";
 import { selfieLimit } from "../../../../elyra-be/src/onboarding/options";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type FaceApi = typeof import("@vladmandic/face-api");
 let detector: Promise<FaceApi> | undefined;
@@ -163,32 +166,52 @@ export function Camera({ onCapture }: { onCapture: (photo: Blob) => void }) {
   }
 
   return (
-    <>
-      <div className="viewfinder">
-        <video ref={video} muted playsInline aria-label="Live camera preview" />
-        <div className={`face-outline${ready ? " ready" : ""}`} aria-hidden="true" />
+    <div className="space-y-3">
+      <div className="relative grid place-items-center overflow-hidden aspect-[4/3] rounded-2xl bg-[#2e1924] shadow-inner">
+        <video
+          ref={video}
+          muted
+          playsInline
+          aria-label="Live camera preview"
+          className="size-full object-contain -scale-x-100"
+        />
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-[12%_28%] rounded-full transition-colors duration-200",
+            ready ? "border-3 border-[#9ceeaf]" : "border-2 border-dashed border-white/70",
+          )}
+        />
       </div>
-      <p className={ready ? "camera-ready" : ""} role="status">
+      <p
+        className={cn(
+          "text-sm",
+          ready ? "font-semibold text-emerald-800" : "text-muted-foreground",
+        )}
+        role="status"
+      >
         {guidance}
       </p>
-      <div className="actions">
+      <div className="flex justify-end">
         {cameraError ? (
-          <button
-            className="outline"
+          <Button
+            variant="outline"
             onClick={() => {
               setCameraError(false);
               setGuidance("Starting your camera…");
               setGeneration((n) => n + 1);
             }}
           >
-            Restart camera
-          </button>
+            <RefreshCw className="size-4" />
+            <span>Restart camera</span>
+          </Button>
         ) : (
-          <button className="action" disabled={!ready || capturing} onClick={capture}>
-            Capture selfie
-          </button>
+          <Button disabled={!ready || capturing} onClick={capture}>
+            <CameraIcon className="size-4" />
+            <span>Capture selfie</span>
+          </Button>
         )}
       </div>
-    </>
+    </div>
   );
 }
