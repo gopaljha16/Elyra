@@ -37,6 +37,18 @@ The Gemini check considers visible spoof cues and compares the two faces. One st
 
 Add `GOOGLE_PLACES_API_KEY` to the backend environment to enable real venue suggestions. The API queries Google Nearby Search only when a matched pair opens the venue picker or submits a proposal. Enable Places API (New) for the key. Both users set an approximate area through browser location access. The first release matches people in the same city whose age, gender and distance preferences fit both ways. Each user chooses up to five date activities on the dashboard. After both accept, the pair can propose a venue and time. The other participant must accept the current proposal version. Feedback is private to the submitting account. The map provider returns venue names and addresses on demand.
 
+### Discovery and venue rollout
+
+Apply the checked-in migrations with `bunx prisma migrate deploy` in the target environment and regenerate the client before starting the updated API. Set `DATING_PILOT_AREA` to a saved city label. Start with `DISCOVERY_MODE=shadow` to compare result counts, overlap and timings, then use `radius` to serve the new results in that area. Set `city` to restore city retrieval. Radius retrieval uses the PostgreSQL latitude/longitude index plus mutual great-circle distance checks.
+
+Set a backend-only `GOOGLE_ROUTES_API_KEY` to enable the optional walking comparison in the pilot. Members can set or remove their walking areas in Preferences. The venue list works independently of Routes. For the optional in-page map, build the frontend with a referrer-restricted `NEXT_PUBLIC_MAPS_EMBED_KEY`.
+
+### Measuring the pilot
+
+Run [first-plan.sql](analytics/first-plan.sql) for verified-to-confirmed conversion and [date-outcomes.sql](analytics/date-outcomes.sql) for proposal acceptance and feedback coverage. These queries use completed UTC cohorts.
+
+API logs contain discovery counts and latency, plus candidate exposures. Deduplicate exposures by search ID and candidate ID before joining invitations by viewer and candidate. For dashboard field performance, group `dashboard_vital` by frame and metric, use the last value for each metric ID, and calculate the 75th percentile. `candidate_thumbnail` separates download time from image transformation. Compare Places call counts and Routes matrix elements with actual provider billing and confirmed plan counts before widening the pilot.
+
 ## Live verification for matchmaking
 
 Matchmaking requires a separate live camera check. Configure `AWS_REGION` and `AWS_LIVENESS_STREAM_ROLE_ARN` in the backend. The backend needs permission to create and read Rekognition Face Liveness sessions, compare faces, and call STS `AssumeRole` on the named stream role. The stream role must trust the backend role and grant only `rekognition:StartFaceLivenessSession`. A signed-in user receives temporary stream credentials for one 15-minute STS session. The Rekognition liveness session itself expires after three minutes, so every retry creates a new session. The API allows three sessions per account per 24 hours. On completion, the server requires a liveness confidence of at least 90 and face similarity of at least 90 against the primary photo. The result is bound to that photo. Calibrate these thresholds with pilot data before opening the service to the public. AWS credentials and a supported region are required for the live check. The API returns a configuration error until they are present.

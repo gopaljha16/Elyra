@@ -14,7 +14,9 @@ const placeSchema = z.object({
   id: z.string(),
   displayName: z.object({ text: z.string() }),
   formattedAddress: z.string().optional(),
-  location: z.object({ latitude: z.number(), longitude: z.number() }).optional(),
+  attributions: z
+    .array(z.object({ provider: z.string().optional(), providerUri: z.string().optional() }))
+    .optional(),
   businessStatus: z.string().optional(),
 });
 
@@ -27,6 +29,7 @@ export async function nearbyVenues(
   z.enum(dateActivities).parse(activity);
   if (!key) throw new ApiError(503, "Venue search is unavailable. Try again later.");
   try {
+    console.info(JSON.stringify({ event: "venue_search_request" }));
     const response = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
       method: "POST",
       signal: AbortSignal.timeout(8_000),
@@ -34,7 +37,7 @@ export async function nearbyVenues(
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.businessStatus",
+          "places.id,places.displayName,places.formattedAddress,places.attributions,places.businessStatus",
       },
       body: JSON.stringify({
         includedTypes: types[activity],
@@ -45,12 +48,12 @@ export async function nearbyVenues(
     if (!response.ok) throw new Error(`Places HTTP ${response.status}`);
     const data = z.object({ places: z.array(placeSchema).optional() }).parse(await response.json());
     return (data.places ?? [])
-      .filter((place) => place.businessStatus !== "CLOSED_PERMANENTLY")
+      .filter((place) => !place.businessStatus?.startsWith("CLOSED_"))
       .map((place) => ({
         id: place.id,
         name: place.displayName.text,
         address: place.formattedAddress ?? "Address unavailable",
-        location: place.location,
+        attributions: place.attributions ?? [],
       }));
   } catch (error) {
     console.error("Venue search failed", error instanceof Error ? error.message : "Unknown error");

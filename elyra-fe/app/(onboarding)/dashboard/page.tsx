@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { onboardingRequest, type OnboardingStatus } from "@/lib/onboarding";
 import { Shell } from "../onboarding/shell";
 import { ClearDraft } from "../onboarding/draft-storage";
+import { DashboardVitals } from "./vitals";
 import { LiveCheck } from "./live-check";
 
 export default async function DashboardPage() {
@@ -46,6 +47,7 @@ export default async function DashboardPage() {
 
   return (
     <Shell size="wide" headerRight={<UserButton />}>
+      <DashboardVitals />
       <ClearDraft userId={session.userId} />
       <div className="space-y-2 pb-6 border-b border-border/70">
         <p className="text-xs font-bold uppercase tracking-wider text-primary">Your Elyra space</p>

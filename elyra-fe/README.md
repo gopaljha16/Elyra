@@ -16,3 +16,5 @@ Profile photos are resized to at most 1024 pixels on the longest side and encode
 The dating dashboard requires a separate live camera check before opening nearby matching. It uses Amazon Rekognition Face Liveness through the Amplify React component. The backend creates the session and supplies short-lived streaming credentials to the signed-in account. Camera access requires HTTPS or localhost.
 
 Run `bun run lint` and `bun run build` to check the frontend.
+
+Run `bunx playwright test --config playwright.dashboard.config.ts` for the two-member dashboard fixture. It uses the application component and stylesheet with local session and API fixtures.

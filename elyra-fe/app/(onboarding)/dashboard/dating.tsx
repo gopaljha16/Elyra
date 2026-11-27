@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import { DateFeedback } from "./date-feedback";
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -58,6 +59,7 @@ type Candidate = {
   location: string;
   interests: string[];
   activities: string[];
+  position: number;
 };
 type Plan = {
   activity: string | null;
@@ -66,6 +68,7 @@ type Plan = {
   scheduledAt: string | null;
   status: string;
   proposalVersion: number;
+  acceptedByMe: boolean;
 } | null;
 type Match = {
   id: string;
@@ -78,7 +81,14 @@ type Match = {
   feedbackSubmitted: boolean;
   bothWantAgain: boolean;
 };
-type Venue = { id: string; name: string; address: string };
+type Venue = {
+  id: string;
+  name: string;
+  address: string;
+  attributions?: { provider?: string; providerUri?: string }[];
+  walkingMinutes?: number | null;
+  balanced?: boolean;
+};
 const options = ["Coffee", "Bowling", "Arcade", "Museum", "Mall", "Walk"];
 
 function PersonPhoto({ id, name }: { id: string; name: string }) {
@@ -136,10 +146,18 @@ export function Dating({
   const [activities, setActivities] = useState(initialActivities);
   const [location, setLocation] = useState(initialLocation);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [searchId, setSearchId] = useState("");
+  const [tab, setTab] = useState("preferences");
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
   const [activity, setActivity] = useState("Coffee");
   const [venues, setVenues] = useState<Venue[]>([]);
   const [venueId, setVenueId] = useState("");
+  const [walkingEnabled, setWalkingEnabled] = useState(false);
+  const [walkingPilot, setWalkingPilot] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [meetingLabel, setMeetingLabel] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [notice, setNotice] = useState<{ text: string; tone: "error" | "success" } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -147,19 +165,6 @@ export function Dating({
   const [blockTarget, setBlockTarget] = useState<{ id: string; name: string } | null>(null);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [reportReason, setReportReason] = useState("");
-  const [feedback, setFeedback] = useState<
-    Record<
-      string,
-      {
-        attended: boolean;
-        rating: number;
-        comfort: number;
-        enjoyment: number;
-        wouldMeetAgain: boolean;
-      }
-    >
-  >({});
-
   const request = useCallback(
     async (path: string, method = "GET", body?: unknown) => {
       const token = await getToken();
@@ -184,21 +189,25 @@ export function Dating({
   const refresh = useCallback(async () => {
     const data = await request("/matches");
     setMatches(data.matches);
-    if (activities.length && location) setCandidates((await request("/candidates")).candidates);
-  }, [request, activities.length, location]);
-
-  useEffect(() => {
-    void request("/matches")
-      .then((data) => setMatches(data.matches))
-      .catch((error) => setNotice({ text: message(error), tone: "error" }));
+    setWalkingEnabled(Boolean(data.walkingEnabled));
+    setWalkingPilot(Boolean(data.walkingPilot));
+    setRefreshFailed(false);
   }, [request]);
 
-  async function act(operation: () => Promise<void>, successMessage?: string) {
+  useEffect(() => {
+    void refresh().catch((error) => setNotice({ text: message(error), tone: "error" }));
+  }, [refresh]);
+
+  async function act(
+    operation: () => Promise<void>,
+    successMessage?: string,
+    updateMatches = true,
+  ) {
     setBusy(true);
     setNotice(null);
     try {
       await operation();
-      await refresh();
+      if (updateMatches) await refresh().catch(() => setRefreshFailed(true));
       if (successMessage) setNotice({ text: successMessage, tone: "success" });
     } catch (error) {
       setNotice({ text: message(error), tone: "error" });
@@ -207,6 +216,56 @@ export function Dating({
     }
   }
 
+  async function search() {
+    setTab("discover");
+    setSearchState("loading");
+    try {
+      const data = await request("/candidates");
+      if (data.needsArea) {
+        setTab("preferences");
+        setSearchState("idle");
+        setCandidates([]);
+        setNotice({ tone: "error", text: "Choose Use my approximate area before searching." });
+        return;
+      }
+      setCandidates(
+        data.candidates.map((person: Candidate, index: number) => ({
+          ...person,
+          position: index + 1,
+        })),
+      );
+      setSearchId(data.searchId ?? "");
+      setSearchState("done");
+    } catch (error) {
+      setSearchState("error");
+      throw error;
+    }
+  }
+
+  useEffect(() => {
+    if (!searchId || tab !== "discover" || searchState !== "done") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.intersectionRatio < 0.5) continue;
+          const card = entry.target as HTMLElement;
+          observer.unobserve(card);
+          if (card.dataset.seen === searchId) continue;
+          card.dataset.seen = searchId;
+          void request("/impressions", "POST", {
+            searchId,
+            candidateId: card.dataset.candidate,
+            position: Number(card.dataset.position),
+            scoringVersion: 1,
+          }).catch(() => undefined);
+        }
+      },
+      { threshold: 0.5 },
+    );
+    document.querySelectorAll("[data-candidate]").forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [searchId, searchState, tab, request, candidates]);
+
   function setArea() {
     if (!navigator.geolocation) {
       setNotice({ text: "Location is unavailable in this browser.", tone: "error" });
@@ -214,14 +273,19 @@ export function Dating({
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        void act(async () => {
-          await request("/area", "PUT", {
-            location,
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-          setCandidates((await request("/candidates")).candidates);
-        }, "Your area has been updated.");
+        void act(
+          async () => {
+            await request("/area", "PUT", {
+              location,
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            });
+            setSearchState("idle");
+            setCandidates([]);
+          },
+          "Your area has been updated. Choose Find matches to search.",
+          false,
+        );
       },
       () =>
         setNotice({
@@ -232,13 +296,39 @@ export function Dating({
     );
   }
 
-  async function loadVenues(match: Match) {
+  async function walkingArea() {
+    let point = null;
+    if (!walkingEnabled) {
+      if (!navigator.geolocation) throw new Error("Location is unavailable in this browser.");
+      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          () => reject(new Error("Allow location access to set a walking departure area.")),
+          { timeout: 10000 },
+        ),
+      );
+      point = {
+        latitude: Math.round(position.coords.latitude * 100) / 100,
+        longitude: Math.round(position.coords.longitude * 100) / 100,
+      };
+    }
+    const result = await request("/walking-area", "PUT", { point });
+    setWalkingEnabled(result.walkingEnabled);
+  }
+
+  async function loadVenues(match: Match, chosen?: string) {
+    setMapOpen(false);
+    if (selected !== match.id) {
+      setScheduledAt("");
+      setMeetingLabel("");
+    }
+
     setSelected(match.id);
     setVenues([]);
     setVenueId("");
-    const nextActivity = match.activities.includes(activity)
-      ? activity
-      : (match.activities[0] ?? "Coffee");
+    const nextActivity =
+      chosen ??
+      (match.activities.includes(activity) ? activity : (match.activities[0] ?? "Coffee"));
     setActivity(nextActivity);
     const data = await request(
       `/matches/${match.id}/venues?activity=${encodeURIComponent(nextActivity)}`,
@@ -248,8 +338,10 @@ export function Dating({
 
   const current = matches.find((match) => match.id === selected);
 
+  const picked = venues.find((v) => v.id === venueId);
+  const embedKey = process.env.NEXT_PUBLIC_MAPS_EMBED_KEY;
   return (
-    <section className="mt-6 space-y-6">
+    <section className="dating-dashboard mt-6 space-y-6">
       {notice && (
         <Alert variant={notice.tone === "success" ? "success" : "destructive"}>
           <AlertCircle className="size-4 shrink-0 mt-0.5" />
@@ -257,7 +349,16 @@ export function Dating({
         </Alert>
       )}
 
-      <Tabs defaultValue={candidates.length > 0 ? "discover" : "preferences"}>
+      {refreshFailed && (
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => void act(refresh, undefined, false)}
+        >
+          Reload matches
+        </Button>
+      )}
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="preferences">
             <Compass className="size-4" />
@@ -332,18 +433,24 @@ export function Dating({
                   size="sm"
                   disabled={busy || !activities.length}
                   onClick={() =>
-                    void act(async () => {
-                      const token = await getToken();
-                      const response = await fetch(`${endpoint}/api/onboarding/date-activities`, {
-                        method: "PUT",
-                        headers: {
-                          Authorization: `Bearer ${token}`,
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ activities }),
-                      });
-                      if (!response.ok) throw new Error("Couldn’t save date activities.");
-                    }, "Date activities saved.")
+                    void act(
+                      async () => {
+                        const token = await getToken();
+                        const response = await fetch(`${endpoint}/api/onboarding/date-activities`, {
+                          method: "PUT",
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ activities }),
+                        });
+                        if (!response.ok) throw new Error("Couldn’t save date activities.");
+                        setCandidates([]);
+                        setSearchState("idle");
+                      },
+                      "Date activities saved.",
+                      false,
+                    )
                   }
                 >
                   Save activities
@@ -353,6 +460,24 @@ export function Dating({
 
             <div className="space-y-3 pt-4 border-t border-border/70">
               <div className="grid gap-1.5">
+                {(walkingPilot || walkingEnabled) && (
+                  <div className="space-y-2 pb-3">
+                    <p className="text-sm">
+                      For walking estimates, set your departure area while you are there. If both
+                      people opt in, Google Maps receives the rounded areas. Only your own travel
+                      time is shown to you.
+                    </p>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void act(walkingArea, undefined, false)}
+                    >
+                      {walkingEnabled
+                        ? "Remove my walking area"
+                        : "Use this area for walking estimates"}
+                    </Button>
+                  </div>
+                )}
                 <Label htmlFor="area">City</Label>
                 <Input
                   id="area"
@@ -372,11 +497,7 @@ export function Dating({
                 </Button>
                 <Button
                   disabled={busy || !location || !activities.length}
-                  onClick={() =>
-                    void act(async () => {
-                      setCandidates((await request("/candidates")).candidates);
-                    })
-                  }
+                  onClick={() => void act(search, undefined, false)}
                 >
                   <Search className="size-4" />
                   <span>Find matches</span>
@@ -398,22 +519,32 @@ export function Dating({
               variant="outline"
               size="sm"
               disabled={busy || !location || !activities.length}
-              onClick={() =>
-                void act(async () => {
-                  setCandidates((await request("/candidates")).candidates);
-                })
-              }
+              onClick={() => void act(search, undefined, false)}
             >
               <Search className="size-4" />
               <span>Refresh</span>
             </Button>
           </div>
 
-          {candidates.length === 0 ? (
+          {searchState !== "done" || candidates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-background/40 p-8 text-center space-y-2">
-              <p className="font-serif text-xl text-foreground">No candidates loaded yet</p>
+              <p className="font-serif text-xl text-foreground">
+                {searchState === "loading"
+                  ? "Searching nearby..."
+                  : searchState === "error"
+                    ? "Search interrupted"
+                    : searchState === "done"
+                      ? "No more people to show"
+                      : "Ready to discover?"}
+              </p>
               <p className="text-sm text-muted-foreground">
-                Set your activities and city in Preferences, then click Find matches.
+                {searchState === "done"
+                  ? "Check back as more people join your area."
+                  : searchState === "error"
+                    ? "Choose Refresh to try again."
+                    : searchState === "idle"
+                      ? "Set your activities and area, then choose Find matches."
+                      : "Checking your mutual preferences."}
               </p>
             </div>
           ) : (
@@ -421,6 +552,8 @@ export function Dating({
               {candidates.map((person) => (
                 <article
                   key={person.id}
+                  data-candidate={person.id}
+                  data-position={person.position}
                   className="flex flex-col justify-between gap-4 rounded-2xl border border-border bg-background/60 p-5 shadow-xs transition-shadow hover:shadow-md"
                 >
                   <div className="flex items-start gap-4">
@@ -434,11 +567,13 @@ export function Dating({
                         <span className="truncate">{person.location}</span>
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed pt-1">
-                        <span className="font-semibold text-foreground/80">Interests:</span>{" "}
+                        <span className="font-semibold text-foreground/80">Shared interests:</span>{" "}
                         {person.interests.join(", ") || "none yet"}
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        <span className="font-semibold text-foreground/80">Dates:</span>{" "}
+                        <span className="font-semibold text-foreground/80">
+                          Dates you both enjoy:
+                        </span>{" "}
                         {person.activities.join(", ") || "choose together"}
                       </p>
                     </div>
@@ -547,17 +682,22 @@ export function Dating({
                           Decline
                         </Button>
                       )}
-                      {match.status === "ACTIVE" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy || !match.activities.length}
-                          onClick={() => void act(() => loadVenues(match))}
-                        >
-                          <Calendar className="size-4" />
-                          <span>Plan a date</span>
-                        </Button>
-                      )}
+                      {match.status === "ACTIVE" &&
+                        (match.plan?.status !== "CONFIRMED" || match.bothWantAgain) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy || !match.activities.length}
+                            onClick={() => void act(() => loadVenues(match), undefined, false)}
+                          >
+                            <Calendar className="size-4" />
+                            <span>
+                              {match.plan?.status === "PROPOSED"
+                                ? "Suggest another plan"
+                                : "Propose a date"}
+                            </span>
+                          </Button>
+                        )}
                     </div>
                   </div>
 
@@ -571,11 +711,18 @@ export function Dating({
                           {match.plan.scheduledAt
                             ? new Date(match.plan.scheduledAt).toLocaleString()
                             : "Time pending"}{" "}
-                          · Status: {match.plan.status}
+                          ·{" "}
+                          {match.plan.status === "PROPOSED"
+                            ? match.plan.acceptedByMe
+                              ? "Waiting for their answer"
+                              : "Review your invitation"
+                            : match.plan.status === "CONFIRMED"
+                              ? "Date confirmed"
+                              : "Plan cancelled"}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        {match.plan.status === "CONFIRMED" && (
+                        {match.plan.venueId && match.plan.status !== "CANCELLED" && (
                           <Button variant="outline" size="sm" asChild>
                             <a
                               target="_blank"
@@ -583,11 +730,11 @@ export function Dating({
                               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.plan.location)}&query_place_id=${encodeURIComponent(match.plan.venueId ?? "")}`}
                             >
                               <MapPin className="size-3.5" />
-                              <span>Directions</span>
+                              <span>View venue</span>
                             </a>
                           </Button>
                         )}
-                        {match.plan.status === "PROPOSED" && (
+                        {match.plan.status === "PROPOSED" && !match.plan.acceptedByMe && (
                           <Button
                             size="sm"
                             disabled={busy}
@@ -633,124 +780,19 @@ export function Dating({
                     match.plan.scheduledAt &&
                     new Date(match.plan.scheduledAt) <= new Date() &&
                     !match.feedbackSubmitted && (
-                      <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-                        <h4 className="font-serif text-lg font-medium text-foreground">
-                          How was your date?
-                        </h4>
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-[#842b50] rounded"
-                            checked={feedback[match.id]?.attended ?? false}
-                            onChange={(event) =>
-                              setFeedback((previous) => ({
-                                ...previous,
-                                [match.id]: {
-                                  ...previous[match.id],
-                                  attended: event.target.checked,
-                                  rating: previous[match.id]?.rating ?? 3,
-                                  comfort: previous[match.id]?.comfort ?? 3,
-                                  enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false,
-                                },
-                              }))
-                            }
-                          />
-                          <span>We met in person</span>
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          {(["rating", "comfort", "enjoyment"] as const).map((field) => (
-                            <div className="grid gap-1.5" key={field}>
-                              <Label htmlFor={`${match.id}-${field}`}>
-                                {field === "rating"
-                                  ? "Overall"
-                                  : field === "comfort"
-                                    ? "Comfort"
-                                    : "Enjoyment"}{" "}
-                                (1–5)
-                              </Label>
-                              <Select
-                                value={String(feedback[match.id]?.[field] ?? 3)}
-                                onValueChange={(value) =>
-                                  setFeedback((previous) => ({
-                                    ...previous,
-                                    [match.id]: {
-                                      attended: previous[match.id]?.attended ?? false,
-                                      wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false,
-                                      rating: previous[match.id]?.rating ?? 3,
-                                      comfort: previous[match.id]?.comfort ?? 3,
-                                      enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                      [field]: Number(value),
-                                    },
-                                  }))
-                                }
-                              >
-                                <SelectTrigger id={`${match.id}-${field}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {[1, 2, 3, 4, 5].map((value) => (
-                                    <SelectItem key={value} value={String(value)}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
-                        </div>
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-[#842b50] rounded"
-                            checked={feedback[match.id]?.wouldMeetAgain ?? false}
-                            onChange={(event) =>
-                              setFeedback((previous) => ({
-                                ...previous,
-                                [match.id]: {
-                                  attended: previous[match.id]?.attended ?? false,
-                                  rating: previous[match.id]?.rating ?? 3,
-                                  comfort: previous[match.id]?.comfort ?? 3,
-                                  enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: event.target.checked,
-                                },
-                              }))
-                            }
-                          />
-                          <span>I would meet again</span>
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await request(`/matches/${match.id}/feedback`, "POST", {
-                                  attended: feedback[match.id]?.attended ?? false,
-                                  rating: feedback[match.id]?.rating ?? 3,
-                                  comfort: feedback[match.id]?.comfort ?? 3,
-                                  enjoyment: feedback[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: feedback[match.id]?.wouldMeetAgain ?? false,
-                                });
-                              }, "Your feedback was saved privately.")
-                            }
-                          >
-                            Save private feedback
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await request(`/matches/${match.id}/no-show`, "POST");
-                              }, "Your no-show report was saved privately.")
-                            }
-                          >
-                            We didn’t meet
-                          </Button>
-                        </div>
-                      </div>
+                      <DateFeedback
+                        key={match.plan.proposalVersion}
+                        busy={busy}
+                        onSubmit={(answers) =>
+                          void act(async () => {
+                            await request(`/matches/${match.id}/feedback`, "POST", {
+                              ...answers,
+                              formVersion: 2,
+                              version: match.plan?.proposalVersion,
+                            });
+                          }, "Your feedback was saved privately.")
+                        }
+                      />
                     )}
 
                   {match.feedbackSubmitted && (
@@ -793,7 +835,7 @@ export function Dating({
 
       {/* Plan a date Dialog */}
       <Dialog open={Boolean(current)} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Choose a place</DialogTitle>
             <DialogDescription>
@@ -806,16 +848,10 @@ export function Dating({
                 <Label htmlFor="plan-activity">Activity</Label>
                 <Select
                   value={activity}
-                  onValueChange={(value) => {
-                    setActivity(value);
-                    void act(async () => {
-                      const data = await request(
-                        `/matches/${current.id}/venues?activity=${encodeURIComponent(value)}`,
-                      );
-                      setVenues(data.venues);
-                      setVenueId("");
-                    });
-                  }}
+                  disabled={busy}
+                  onValueChange={(value) =>
+                    void act(() => loadVenues(current, value), undefined, false)
+                  }
                 >
                   <SelectTrigger id="plan-activity">
                     <SelectValue />
@@ -832,14 +868,22 @@ export function Dating({
 
               <div className="grid gap-1.5">
                 <Label htmlFor="venue">Venue</Label>
-                <Select value={venueId} onValueChange={setVenueId}>
+                <Select
+                  disabled={busy || !venues.length}
+                  value={venueId}
+                  onValueChange={setVenueId}
+                >
                   <SelectTrigger id="venue">
                     <SelectValue placeholder="Choose a venue" />
                   </SelectTrigger>
                   <SelectContent>
                     {venues.map((venue) => (
                       <SelectItem key={venue.id} value={venue.id}>
-                        {venue.name} — {venue.address}
+                        {venue.name}
+                        {venue.walkingMinutes != null
+                          ? ` (about ${venue.walkingMinutes} min walk for you)`
+                          : ""}{" "}
+                        — {venue.address}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -847,6 +891,90 @@ export function Dating({
               </div>
 
               <div className="grid gap-1.5">
+                {notice?.tone === "error" && <p role="alert">{notice.text}</p>}
+                {!venues.length && (
+                  <div role="status">
+                    {busy
+                      ? "Finding public venues..."
+                      : notice?.tone === "error"
+                        ? "Venue search interrupted."
+                        : "No venues found for this activity."}{" "}
+                    {!busy && (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void act(() => loadVenues(current, activity), undefined, false)
+                        }
+                      >
+                        Retry venue search
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {!!venues.length && (
+                  <div className="text-xs">
+                    Google Maps
+                    {Array.from(
+                      new Map(
+                        venues
+                          .flatMap((v) => v.attributions ?? [])
+                          .filter((a) => a.provider)
+                          .map((a) => [a.provider, a]),
+                      ).values(),
+                    ).map((a) => (
+                      <span key={a.provider}>
+                        {" "}
+                        /{" "}
+                        {a.providerUri?.startsWith("https://") ? (
+                          <a href={a.providerUri} target="_blank" rel="noreferrer">
+                            {a.provider}
+                          </a>
+                        ) : (
+                          a.provider
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {picked && (
+                  <div className="grid gap-2">
+                    {picked.walkingMinutes != null && (
+                      <p className="text-sm">
+                        {picked.balanced && "Compared using walking times from both areas. "}Walking
+                        routes may lack sidewalks or pedestrian paths.
+                      </p>
+                    )}
+                    <a
+                      className="underline text-primary"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(picked.name)}&query_place_id=${encodeURIComponent(picked.id)}`}
+                    >
+                      View venue on Google Maps
+                    </a>
+                    {embedKey && (
+                      <Button variant="outline" onClick={() => setMapOpen(!mapOpen)}>
+                        {mapOpen ? "Hide map" : "Show map"}
+                      </Button>
+                    )}
+                    {mapOpen && embedKey && (
+                      <iframe
+                        title="Selected public venue"
+                        className="h-48 w-full rounded-xl"
+                        referrerPolicy="strict-origin-when-cross-origin"
+                        src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(embedKey)}&q=place_id:${encodeURIComponent(picked.id)}`}
+                      />
+                    )}
+                    <Label htmlFor="meeting-label">Meeting point (optional)</Label>
+                    <Input
+                      id="meeting-label"
+                      value={meetingLabel}
+                      maxLength={80}
+                      placeholder="For example, by the main entrance"
+                      onChange={(e) => setMeetingLabel(e.target.value)}
+                    />
+                  </div>
+                )}
                 <Label htmlFor="date-time">Date and time</Label>
                 <Input
                   id="date-time"
@@ -869,6 +997,8 @@ export function Dating({
                   await request(`/matches/${current.id}/plan`, "POST", {
                     activity,
                     venueId,
+                    meetingLabel: meetingLabel.trim() || undefined,
+                    expectedVersion: current.plan?.proposalVersion ?? null,
                     scheduledAt: new Date(scheduledAt).toISOString(),
                   });
                   setSelected(null);

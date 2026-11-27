@@ -1,3 +1,5 @@
+import { walkingOptions, middleLongitude } from "./travel.js";
+import { discover, fits, shared, compatibility } from "./discovery.js";
 import { Router } from "express";
 import { z } from "zod";
 import type { PrismaClient, User } from "@prisma/client";
@@ -10,14 +12,6 @@ import type { Storage } from "../onboarding/routes.js";
 
 const idBody = z.object({ userId: z.string().min(1) });
 const reportBody = idBody.extend({ reason: z.string().trim().min(5).max(500) });
-const preferences = z.object({
-  minAge: z.number(),
-  maxAge: z.number(),
-  gender: z.string(),
-  maxDistance: z.number(),
-  relationship: z.string(),
-});
-
 function eligible(user: User) {
   if (
     !user.isActive ||
@@ -28,65 +22,6 @@ function eligible(user: User) {
   ) {
     throw new ApiError(403, "Complete live face verification before matching.");
   }
-}
-
-function fits(viewer: User, candidate: User) {
-  const prefs = preferences.safeParse(viewer.preferences);
-  if (!prefs.success) return false;
-  const p = prefs.data;
-  const otherPreferences = preferences.safeParse(candidate.preferences);
-  if (!otherPreferences.success) return false;
-  const relationshipFits =
-    p.relationship === otherPreferences.data.relationship ||
-    p.relationship === "Still figuring it out" ||
-    otherPreferences.data.relationship === "Still figuring it out";
-  const acceptedGender =
-    p.gender === "Everyone" ||
-    p.gender === ({ Woman: "Women", Man: "Men" } as Record<string, string>)[candidate.gender] ||
-    (p.gender === "Nonbinary people" && candidate.gender === "Nonbinary");
-  const distance =
-    viewer.latitude != null &&
-    viewer.longitude != null &&
-    candidate.latitude != null &&
-    candidate.longitude != null
-      ? (() => {
-          const toRadians = Math.PI / 180;
-          const deltaLatitude = (candidate.latitude! - viewer.latitude!) * toRadians;
-          const deltaLongitude = (candidate.longitude! - viewer.longitude!) * toRadians;
-          const arc =
-            Math.sin(deltaLatitude / 2) ** 2 +
-            Math.cos(viewer.latitude! * toRadians) *
-              Math.cos(candidate.latitude! * toRadians) *
-              Math.sin(deltaLongitude / 2) ** 2;
-          return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(arc)));
-        })()
-      : null;
-  return (
-    relationshipFits &&
-    acceptedGender &&
-    candidate.age >= p.minAge &&
-    candidate.age <= p.maxAge &&
-    distance !== null &&
-    distance <= p.maxDistance
-  );
-}
-
-function shared(a: User, b: User) {
-  return {
-    interests: a.interests.filter((item) => b.interests.includes(item)),
-    activities: a.dateActivities.filter((item) => b.dateActivities.includes(item)),
-  };
-}
-
-function compatibility(a: User, b: User) {
-  const common = shared(a, b);
-  const first = z.record(z.string(), z.string()).safeParse(a.personalityAnswers);
-  const second = z.record(z.string(), z.string()).safeParse(b.personalityAnswers);
-  const personality =
-    first.success && second.success
-      ? Object.keys(first.data).filter((key) => first.data[key] === second.data[key]).length
-      : 0;
-  return common.interests.length * 2 + common.activities.length * 3 + personality;
 }
 
 export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage) {
@@ -117,65 +52,90 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     res.json({ saved: true });
   });
 
+  router.put("/walking-area", async (req, res) => {
+    const user = await self(clerkId(req));
+    const point = z
+      .object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })
+      .nullable()
+      .parse(req.body.point);
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        walkingLatitude: point ? Math.round(point.latitude * 100) / 100 : null,
+        walkingLongitude: point ? Math.round(point.longitude * 100) / 100 : null,
+      },
+    });
+    res.json({ walkingEnabled: !!point });
+  });
+
   router.get("/candidates", async (req, res) => {
     const user = await self(clerkId(req));
-    const excluded = await db.userBlock.findMany({
-      where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
-    });
-    const ids = new Set(
-      excluded.map((block) => (block.blockerId === user.id ? block.blockedId : block.blockerId)),
+    const mode = process.env.DISCOVERY_MODE ?? "city";
+    const pilotArea = process.env.DATING_PILOT_AREA?.trim().toLowerCase();
+    const pilot = user.location.trim().toLowerCase() === pilotArea;
+    const radius = mode === "radius" && pilot;
+    const started = performance.now();
+    const ranked = await discover(db, user, radius);
+    console.info(
+      JSON.stringify({
+        event: "discovery_results",
+        count: ranked.length,
+        strategy: radius ? "radius" : "city",
+        ms: Math.round(performance.now() - started),
+      }),
     );
-    const existing = await db.match.findMany({
-      where: { OR: [{ user1Id: user.id }, { user2Id: user.id }] },
+    if (mode === "shadow" && pilot) {
+      const began = performance.now();
+      const alternative = await discover(db, user, true).catch(() => null);
+      if (alternative)
+        console.info(
+          JSON.stringify({
+            event: "discovery_shadow",
+            radiusCount: alternative.length,
+            cityCount: ranked.length,
+            overlap: alternative.filter((p) => ranked.some((c) => c.id === p.id)).length,
+            ms: Math.round(performance.now() - began),
+          }),
+        );
+    }
+    res.json({
+      candidates: ranked,
+      needsArea: user.latitude == null || user.longitude == null,
+      searchId: crypto.randomUUID(),
+      scoringVersion: 1,
     });
-    for (const match of existing)
-      ids.add(match.user1Id === user.id ? match.user2Id : match.user1Id);
-    ids.add(user.id);
-    const candidates = await db.user.findMany({
-      where: {
-        id: { notIn: [...ids] },
-        isActive: true,
-        isOnboarded: true,
-        verificationStatus: "VERIFIED",
-        liveVerifiedAt: { not: null },
-        location: { equals: user.location, mode: "insensitive" },
-      },
-      take: 100,
-    });
-    const ranked = candidates
-      .filter(
-        (person) =>
-          person.livePrimaryPhotoUrl === person.primaryPhotoUrl &&
-          fits(user, person) &&
-          fits(person, user),
-      )
-      .map((person) => {
-        const common = shared(user, person);
-        return {
-          id: person.id,
-          name: person.name,
-          age: person.age,
-          location: person.location,
-          interests: common.interests,
-          activities: common.activities,
-          score: compatibility(user, person),
-        };
+  });
+
+  router.post("/vitals", (req, res) => {
+    const metric = z
+      .object({
+        id: z.string().max(80),
+        name: z.enum(["LCP", "INP", "CLS"]),
+        value: z.number().nonnegative(),
+        frame: z.enum(["phone", "tablet", "desktop"]),
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20);
-    res.json({ candidates: ranked });
+      .parse(req.body);
+    console.info(JSON.stringify({ event: "dashboard_vital", ...metric }));
+    res.sendStatus(204);
+  });
+  router.post("/impressions", async (req, res) => {
+    const user = await self(clerkId(req));
+    const input = z
+      .object({
+        searchId: z.uuid(),
+        candidateId: z.string().min(1).max(100),
+        position: z.number().int().min(1).max(20),
+        scoringVersion: z.literal(1),
+      })
+      .parse(req.body);
+    console.info(JSON.stringify({ event: "candidate_seen", viewerId: user.id, ...input }));
+    res.sendStatus(204);
   });
 
   router.get("/people/:id/photo", async (req, res) => {
     const user = await self(clerkId(req));
     const other = await db.user.findUnique({ where: { id: String(req.params.id) } });
-    if (
-      !storage ||
-      !other?.primaryPhotoUrl ||
-      other.location.toLowerCase() !== user.location.toLowerCase() ||
-      !fits(user, other) ||
-      !fits(other, user)
-    )
+    if (!storage || !other?.primaryPhotoUrl || !fits(user, other) || !fits(other, user))
       throw new ApiError(404, "Photo unavailable.");
     eligible(other);
     const blocked = await db.userBlock.count({
@@ -187,12 +147,23 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       },
     });
     if (blocked) throw new ApiError(404, "Photo unavailable.");
+    const began = performance.now();
     const { bytes } = await storage.download(other.primaryPhotoUrl, other.clerkId);
+    const downloaded = performance.now();
     const thumbnail = await sharp(bytes)
       .rotate()
       .resize(320, 320, { fit: "cover" })
       .webp({ quality: 65 })
       .toBuffer();
+    console.info(
+      JSON.stringify({
+        event: "candidate_thumbnail",
+        downloadMs: Math.round(downloaded - began),
+        transformMs: Math.round(performance.now() - downloaded),
+        sourceBytes: bytes.length,
+        thumbnailBytes: thumbnail.length,
+      }),
+    );
     res.set("Cache-Control", "private, max-age=60").type("image/webp").send(thumbnail);
   });
 
@@ -231,7 +202,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const user = await self(clerkId(req));
     const { userId } = idBody.parse(req.body);
     const other = await db.user.findUnique({ where: { id: userId } });
-    if (!other || !fits(user, other) || !fits(other, user))
+    if (!other || other.id === user.id || !fits(user, other) || !fits(other, user))
       throw new ApiError(409, "This match is unavailable.");
     eligible(other);
     const blocked = await db.userBlock.count({
@@ -275,6 +246,10 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       orderBy: { updatedAt: "desc" },
     });
     res.json({
+      walkingEnabled: user.walkingLatitude != null && user.walkingLongitude != null,
+      walkingPilot:
+        !!process.env.GOOGLE_ROUTES_API_KEY &&
+        user.location.trim().toLowerCase() === process.env.DATING_PILOT_AREA?.trim().toLowerCase(),
       matches: matches.map((match) => {
         const other = match.user1Id === user.id ? match.user2 : match.user1;
         const feedback = match.feedbacks.filter(
@@ -287,7 +262,13 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
           acceptedByThem: match.user1Id === user.id ? match.acceptedByUser2 : match.acceptedByUser1,
           person: { id: other.id, name: other.name, age: other.age },
           activities: shared(user, other).activities,
-          plan: match.datePlan,
+          plan: match.datePlan && {
+            ...match.datePlan,
+            acceptedByMe:
+              match.user1Id === user.id
+                ? match.datePlan.acceptedByUser1
+                : match.datePlan.acceptedByUser2,
+          },
           feedbackSubmitted: feedback.some((entry) => entry.userId === user.id),
           bothWantAgain:
             feedback.length === 2 &&
@@ -384,8 +365,29 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     )
       throw new ApiError(409, "Both people need to set an area.");
     const latitude = (user.latitude + other.latitude) / 2;
-    const longitude = (user.longitude + other.longitude) / 2;
-    res.json({ venues: await nearbyVenues(placesKey, activity, latitude, longitude) });
+    const longitude = middleLongitude(user.longitude, other.longitude);
+    const venues = await nearbyVenues(placesKey, activity, latitude, longitude);
+    const key = process.env.GOOGLE_ROUTES_API_KEY;
+    const pilot = process.env.DATING_PILOT_AREA?.trim().toLowerCase();
+    if (
+      key &&
+      user.location.trim().toLowerCase() === pilot &&
+      user.walkingLatitude != null &&
+      user.walkingLongitude != null &&
+      other.walkingLatitude != null &&
+      other.walkingLongitude != null
+    ) {
+      const ranked = await walkingOptions(
+        venues,
+        [
+          { latitude: user.walkingLatitude, longitude: user.walkingLongitude },
+          { latitude: other.walkingLatitude, longitude: other.walkingLongitude },
+        ],
+        key,
+      );
+      return res.json({ venues: ranked });
+    }
+    res.json({ venues });
   });
 
   router.post("/matches/:id/plan", async (req, res) => {
@@ -395,6 +397,8 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       .object({
         activity: z.enum(dateActivities),
         venueId: z.string().min(1),
+        expectedVersion: z.number().int().min(0).nullable().optional(),
+        meetingLabel: z.string().trim().min(1).max(80).optional(),
         scheduledAt: z.iso.datetime(),
       })
       .parse(req.body);
@@ -414,7 +418,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       placesKey,
       input.activity,
       (user.latitude + other.latitude) / 2,
-      (user.longitude + other.longitude) / 2,
+      middleLongitude(user.longitude, other.longitude),
     );
     const venue = venues.find((place) => place.id === input.venueId);
     if (!venue) throw new ApiError(400, "Choose an available venue.");
@@ -422,7 +426,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       activity: input.activity,
       venueId: venue.id,
       scheduledAt,
-      location: venue.name,
+      location: input.meetingLabel ?? "Selected venue",
       activities: [input.activity],
       status: "PROPOSED",
       proposedById: user.id,
@@ -432,6 +436,11 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const plan = await db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
       const current = await tx.datePlan.findUnique({ where: { matchId: match.id } });
+      if (
+        input.expectedVersion !== undefined &&
+        input.expectedVersion !== (current?.proposalVersion ?? null)
+      )
+        throw new ApiError(409, "The proposal has changed. Refresh your matches.");
       if (current?.status === "CONFIRMED") {
         if (current.scheduledAt && +current.scheduledAt > Date.now())
           throw new ApiError(409, "Cancel the confirmed plan before proposing another.");
@@ -465,7 +474,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     if (!plan || plan.status !== "PROPOSED" || plan.proposalVersion !== version)
       throw new ApiError(409, "This proposal changed. Refresh and review it.");
     const updated = await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${plan.id}, 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
       const current = await tx.datePlan.findUniqueOrThrow({ where: { id: plan.id } });
       if (current.status !== "PROPOSED" || current.proposalVersion !== version)
         throw new ApiError(409, "This proposal changed. Refresh and review it.");
@@ -506,16 +515,24 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const plan = match.datePlan;
     if (plan?.status !== "CONFIRMED" || !plan.scheduledAt || +plan.scheduledAt > Date.now())
       throw new ApiError(409, "Feedback opens after a confirmed date.");
-    const input = z
-      .object({
-        attended: z.boolean(),
-        rating: z.number().int().min(1).max(5),
-        comfort: z.number().int().min(1).max(5),
-        enjoyment: z.number().int().min(1).max(5),
-        wouldMeetAgain: z.boolean(),
-        review: z.string().trim().max(500).optional(),
-      })
+    const version = z
+      .object({ version: z.number().int().optional(), formVersion: z.literal(2).optional() })
       .parse(req.body);
+    if (version.version !== undefined && version.version !== plan.proposalVersion)
+      throw new ApiError(409, "This date changed. Refresh your matches.");
+    const input =
+      req.body.attended === false
+        ? { attended: false, rating: null, comfort: null, enjoyment: null, wouldMeetAgain: null }
+        : z
+            .object({
+              attended: z.literal(true),
+              rating: z.number().int().min(1).max(5),
+              comfort: z.number().int().min(1).max(5),
+              enjoyment: z.number().int().min(1).max(5),
+              wouldMeetAgain: z.boolean(),
+              review: z.string().trim().max(500).optional(),
+            })
+            .parse(req.body);
     await db.feedback.upsert({
       where: {
         matchId_userId_planVersion: {
@@ -524,8 +541,14 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
           planVersion: plan.proposalVersion,
         },
       },
-      create: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion, ...input },
-      update: input,
+      create: {
+        matchId: match.id,
+        userId: user.id,
+        planVersion: plan.proposalVersion,
+        ...input,
+        formVersion: version.formVersion ?? 1,
+      },
+      update: { ...input, formVersion: version.formVersion ?? 1 },
     });
     res.json({ submitted: true });
   });
@@ -549,12 +572,18 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
         userId: user.id,
         planVersion: plan.proposalVersion,
         attended: false,
-        rating: 1,
-        comfort: 1,
-        enjoyment: 1,
-        wouldMeetAgain: false,
+        rating: null,
+        comfort: null,
+        enjoyment: null,
+        wouldMeetAgain: null,
       },
-      update: { attended: false, rating: 1, comfort: 1, enjoyment: 1, wouldMeetAgain: false },
+      update: {
+        attended: false,
+        rating: null,
+        comfort: null,
+        enjoyment: null,
+        wouldMeetAgain: null,
+      },
     });
     res.json({ submitted: true });
   });

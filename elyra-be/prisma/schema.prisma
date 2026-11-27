@@ -23,6 +23,8 @@ model User {
   location           String
   latitude           Float?
   longitude          Float?
+  walkingLatitude Float?
+  walkingLongitude Float?
 
   // Profile photos (array of URLs from Supabase Storage)
   profilePhotos      String[]           @default([])
@@ -60,6 +62,7 @@ model User {
   reportsMade        UserReport[]        @relation("ReportsMade")
   reportsReceived    UserReport[]        @relation("ReportsReceived")
 
+  @@index([latitude,longitude],map:"users_latitude_longitude_idx")
   @@map("users")
 }
 
@@ -112,6 +115,8 @@ model Match {
   datePlan   DatePlan?
   feedbacks  Feedback[]
 
+  @@index([user1Id,user2Id],map:"matches_user1_user2_idx")
+  @@index([user2Id,user1Id],map:"matches_user2_user1_idx")
   @@map("matches")
 }
 
@@ -149,10 +154,11 @@ model Feedback {
   id             String   @id @default(cuid())
   matchId        String
   userId         String
-  rating         Int
-  comfort        Int
-  enjoyment      Int
-  wouldMeetAgain Boolean
+  rating         Int?
+  comfort        Int?
+  enjoyment      Int?
+  wouldMeetAgain Boolean?
+  formVersion Int @default(1)
   review         String?
   successScore   Float?
   createdAt      DateTime @default(now())
@@ -202,4 +208,13 @@ model LiveSession {
   user User @relation(fields: [userId], references: [id])
   @@index([userId, createdAt])
   @@map("live_sessions")
+}
+
+model DatingEvent {
+  kind String
+  entity String
+  version Int @default(0)
+  occurredAt DateTime @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')")) @map("occurred_at")
+  @@id([kind, entity, version])
+  @@map("dating_events")
 }
