@@ -138,6 +138,7 @@ export function Dating({
   const [activities, setActivities] = useState(initialActivities);
   const [location, setLocation] = useState(initialLocation);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [searchId, setSearchId] = useState("");
   const [tab, setTab] = useState("preferences");
   const [searchState, setSearchState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [refreshFailed, setRefreshFailed] = useState(false);
@@ -207,13 +208,39 @@ export function Dating({
     setTab("discover");
     setSearchState("loading");
     try {
-      setCandidates((await request("/candidates")).candidates);
+      const data = await request("/candidates");
+      setCandidates(data.candidates);
+      setSearchId(data.searchId ?? "");
       setSearchState("done");
     } catch (error) {
       setSearchState("error");
       throw error;
     }
   }
+
+  useEffect(() => {
+    if (!searchId || tab !== "discover" || searchState !== "done") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.intersectionRatio < 0.5) continue;
+          const card = entry.target as HTMLElement;
+          observer.unobserve(card);
+          if (card.dataset.seen === searchId) continue;
+          card.dataset.seen = searchId;
+          void request("/impressions", "POST", {
+            searchId,
+            candidateId: card.dataset.candidate,
+            position: Number(card.dataset.position),
+            scoringVersion: 1,
+          }).catch(() => undefined);
+        }
+      },
+      { threshold: 0.5 },
+    );
+    document.querySelectorAll("[data-candidate]").forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [searchId, searchState, tab, request, candidates]);
 
   function setArea() {
     if (!navigator.geolocation) {
@@ -452,9 +479,11 @@ export function Dating({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {candidates.map((person) => (
+              {candidates.map((person, index) => (
                 <article
                   key={person.id}
+                  data-candidate={person.id}
+                  data-position={index + 1}
                   className="flex flex-col justify-between gap-4 rounded-2xl border border-border bg-background/60 p-5 shadow-xs transition-shadow hover:shadow-md"
                 >
                   <div className="flex items-start gap-4">
@@ -468,11 +497,13 @@ export function Dating({
                         <span className="truncate">{person.location}</span>
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed pt-1">
-                        <span className="font-semibold text-foreground/80">Interests:</span>{" "}
+                        <span className="font-semibold text-foreground/80">Shared interests:</span>{" "}
                         {person.interests.join(", ") || "none yet"}
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        <span className="font-semibold text-foreground/80">Dates:</span>{" "}
+                        <span className="font-semibold text-foreground/80">
+                          Dates you both enjoy:
+                        </span>{" "}
                         {person.activities.join(", ") || "choose together"}
                       </p>
                     </div>

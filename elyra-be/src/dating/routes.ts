@@ -1,3 +1,4 @@
+import { discover, fits, shared, compatibility } from "./discovery.js";
 import { Router } from "express";
 import { z } from "zod";
 import type { PrismaClient, User } from "@prisma/client";
@@ -10,14 +11,6 @@ import type { Storage } from "../onboarding/routes.js";
 
 const idBody = z.object({ userId: z.string().min(1) });
 const reportBody = idBody.extend({ reason: z.string().trim().min(5).max(500) });
-const preferences = z.object({
-  minAge: z.number(),
-  maxAge: z.number(),
-  gender: z.string(),
-  maxDistance: z.number(),
-  relationship: z.string(),
-});
-
 function eligible(user: User) {
   if (
     !user.isActive ||
@@ -28,65 +21,6 @@ function eligible(user: User) {
   ) {
     throw new ApiError(403, "Complete live face verification before matching.");
   }
-}
-
-function fits(viewer: User, candidate: User) {
-  const prefs = preferences.safeParse(viewer.preferences);
-  if (!prefs.success) return false;
-  const p = prefs.data;
-  const otherPreferences = preferences.safeParse(candidate.preferences);
-  if (!otherPreferences.success) return false;
-  const relationshipFits =
-    p.relationship === otherPreferences.data.relationship ||
-    p.relationship === "Still figuring it out" ||
-    otherPreferences.data.relationship === "Still figuring it out";
-  const acceptedGender =
-    p.gender === "Everyone" ||
-    p.gender === ({ Woman: "Women", Man: "Men" } as Record<string, string>)[candidate.gender] ||
-    (p.gender === "Nonbinary people" && candidate.gender === "Nonbinary");
-  const distance =
-    viewer.latitude != null &&
-    viewer.longitude != null &&
-    candidate.latitude != null &&
-    candidate.longitude != null
-      ? (() => {
-          const toRadians = Math.PI / 180;
-          const deltaLatitude = (candidate.latitude! - viewer.latitude!) * toRadians;
-          const deltaLongitude = (candidate.longitude! - viewer.longitude!) * toRadians;
-          const arc =
-            Math.sin(deltaLatitude / 2) ** 2 +
-            Math.cos(viewer.latitude! * toRadians) *
-              Math.cos(candidate.latitude! * toRadians) *
-              Math.sin(deltaLongitude / 2) ** 2;
-          return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(arc)));
-        })()
-      : null;
-  return (
-    relationshipFits &&
-    acceptedGender &&
-    candidate.age >= p.minAge &&
-    candidate.age <= p.maxAge &&
-    distance !== null &&
-    distance <= p.maxDistance
-  );
-}
-
-function shared(a: User, b: User) {
-  return {
-    interests: a.interests.filter((item) => b.interests.includes(item)),
-    activities: a.dateActivities.filter((item) => b.dateActivities.includes(item)),
-  };
-}
-
-function compatibility(a: User, b: User) {
-  const common = shared(a, b);
-  const first = z.record(z.string(), z.string()).safeParse(a.personalityAnswers);
-  const second = z.record(z.string(), z.string()).safeParse(b.personalityAnswers);
-  const personality =
-    first.success && second.success
-      ? Object.keys(first.data).filter((key) => first.data[key] === second.data[key]).length
-      : 0;
-  return common.interests.length * 2 + common.activities.length * 3 + personality;
 }
 
 export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage) {
@@ -119,64 +53,55 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
 
   router.get("/candidates", async (req, res) => {
     const user = await self(clerkId(req));
-    const excluded = await db.userBlock.findMany({
-      where: { OR: [{ blockerId: user.id }, { blockedId: user.id }] },
-    });
-    const ids = new Set(
-      excluded.map((block) => (block.blockerId === user.id ? block.blockedId : block.blockerId)),
+    const mode = process.env.DISCOVERY_MODE ?? "city";
+    const pilotArea = process.env.DATING_PILOT_AREA?.trim().toLowerCase();
+    const pilot = user.location.trim().toLowerCase() === pilotArea;
+    const radius = mode === "radius" && pilot;
+    const started = performance.now();
+    const ranked = await discover(db, user, radius);
+    console.info(
+      JSON.stringify({
+        event: "discovery_results",
+        count: ranked.length,
+        strategy: radius ? "radius" : "city",
+        ms: Math.round(performance.now() - started),
+      }),
     );
-    const existing = await db.match.findMany({
-      where: { OR: [{ user1Id: user.id }, { user2Id: user.id }] },
-    });
-    for (const match of existing)
-      ids.add(match.user1Id === user.id ? match.user2Id : match.user1Id);
-    ids.add(user.id);
-    const candidates = await db.user.findMany({
-      where: {
-        id: { notIn: [...ids] },
-        isActive: true,
-        isOnboarded: true,
-        verificationStatus: "VERIFIED",
-        liveVerifiedAt: { not: null },
-        location: { equals: user.location, mode: "insensitive" },
-      },
-      take: 100,
-    });
-    const ranked = candidates
-      .filter(
-        (person) =>
-          person.livePrimaryPhotoUrl === person.primaryPhotoUrl &&
-          fits(user, person) &&
-          fits(person, user),
-      )
-      .map((person) => {
-        const common = shared(user, person);
-        return {
-          id: person.id,
-          name: person.name,
-          age: person.age,
-          location: person.location,
-          interests: common.interests,
-          activities: common.activities,
-          score: compatibility(user, person),
-        };
+    if (mode === "shadow" && pilot) {
+      const began = performance.now();
+      const alternative = await discover(db, user, true).catch(() => null);
+      if (alternative)
+        console.info(
+          JSON.stringify({
+            event: "discovery_shadow",
+            radiusCount: alternative.length,
+            cityCount: ranked.length,
+            overlap: alternative.filter((p) => ranked.some((c) => c.id === p.id)).length,
+            ms: Math.round(performance.now() - began),
+          }),
+        );
+    }
+    res.json({ candidates: ranked, searchId: crypto.randomUUID(), scoringVersion: 1 });
+  });
+
+  router.post("/impressions", async (req, res) => {
+    const user = await self(clerkId(req));
+    const input = z
+      .object({
+        searchId: z.uuid(),
+        candidateId: z.string().min(1).max(100),
+        position: z.number().int().min(1).max(20),
+        scoringVersion: z.literal(1),
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 20);
-    console.info(JSON.stringify({ event: "discovery_results", count: ranked.length }));
-    res.json({ candidates: ranked });
+      .parse(req.body);
+    console.info(JSON.stringify({ event: "candidate_seen", viewerId: user.id, ...input }));
+    res.sendStatus(204);
   });
 
   router.get("/people/:id/photo", async (req, res) => {
     const user = await self(clerkId(req));
     const other = await db.user.findUnique({ where: { id: String(req.params.id) } });
-    if (
-      !storage ||
-      !other?.primaryPhotoUrl ||
-      other.location.toLowerCase() !== user.location.toLowerCase() ||
-      !fits(user, other) ||
-      !fits(other, user)
-    )
+    if (!storage || !other?.primaryPhotoUrl || !fits(user, other) || !fits(other, user))
       throw new ApiError(404, "Photo unavailable.");
     eligible(other);
     const blocked = await db.userBlock.count({
@@ -232,7 +157,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const user = await self(clerkId(req));
     const { userId } = idBody.parse(req.body);
     const other = await db.user.findUnique({ where: { id: userId } });
-    if (!other || !fits(user, other) || !fits(other, user))
+    if (!other || other.id === user.id || !fits(user, other) || !fits(other, user))
       throw new ApiError(409, "This match is unavailable.");
     eligible(other);
     const blocked = await db.userBlock.count({

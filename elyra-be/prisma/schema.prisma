@@ -60,6 +60,7 @@ model User {
   reportsMade        UserReport[]        @relation("ReportsMade")
   reportsReceived    UserReport[]        @relation("ReportsReceived")
 
+  @@index([latitude,longitude],map:"users_latitude_longitude_idx")
   @@map("users")
 }
 
@@ -112,6 +113,8 @@ model Match {
   datePlan   DatePlan?
   feedbacks  Feedback[]
 
+  @@index([user1Id,user2Id],map:"matches_user1_user2_idx")
+  @@index([user2Id,user1Id],map:"matches_user2_user1_idx")
   @@map("matches")
 }
 
