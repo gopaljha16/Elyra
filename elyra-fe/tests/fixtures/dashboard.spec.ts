@@ -133,3 +133,48 @@ test("feedback records an explicit missed date without ratings", async ({ page }
   await submit.click();
   await expect.poll(() => saved).toEqual({ attended: false, formVersion: 2, version: 2 });
 });
+
+test("venue search recovers from a provider error and an empty result", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/dating/**", (route) => {
+    if (route.request().url().includes("/venues?")) {
+      attempts++;
+      if (attempts === 1)
+        return route.fulfill({ status: 503, json: { error: "Venue service unavailable." } });
+      return route.fulfill({
+        json: {
+          venues: attempts === 2 ? [] : [{ id: "v", name: "Museum Cafe", address: "Centre" }],
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        matches: [
+          {
+            id: "m",
+            status: "ACTIVE",
+            acceptedByMe: true,
+            person: { id: "p", name: "Bea", age: 27 },
+            activities: ["Coffee"],
+            plan: null,
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: /Matches/ }).click();
+  await page.getByRole("button", { name: "Propose a date" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("alert")).toHaveText("Venue service unavailable.");
+  await dialog.getByRole("button", { name: "Retry venue search" }).click();
+  await expect(dialog.getByRole("status")).toContainText("No venues found");
+  await dialog.getByRole("button", { name: "Retry venue search" }).click();
+  await dialog.getByRole("combobox", { name: "Venue", exact: true }).click();
+  await page.getByRole("option", { name: /Museum Cafe/ }).click();
+  await expect(dialog.getByRole("link", { name: "View venue on Google Maps" })).toHaveAttribute(
+    "href",
+    /query_place_id=v/,
+  );
+  await expect(dialog.locator("iframe")).toHaveCount(0);
+});

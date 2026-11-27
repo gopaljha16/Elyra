@@ -21,6 +21,8 @@ export async function walkingOptions<T extends Venue>(
   if (!key || !venues.length) return venues;
   const shortlist = venues.slice(0, 3);
   const started = performance.now();
+  let completePairs = 0;
+  let providerSucceeded = false;
   try {
     const response = await fetch(
       "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix",
@@ -53,6 +55,8 @@ export async function walkingOptions<T extends Venue>(
         continue;
       times[row.destinationIndex][row.originIndex] = Number.parseFloat(row.duration);
     }
+    providerSucceeded = true;
+    completePairs = times.filter((pair) => pair.every(Number.isFinite)).length;
     const ranked = shortlist
       .map((venue, i) => ({
         venue,
@@ -76,6 +80,8 @@ export async function walkingOptions<T extends Venue>(
       JSON.stringify({
         event: "venue_route_matrix",
         elements: 2 * shortlist.length,
+        completePairs,
+        providerSucceeded,
         ms: Math.round(performance.now() - started),
       }),
     );

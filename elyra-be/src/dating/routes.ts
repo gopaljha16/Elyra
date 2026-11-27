@@ -98,9 +98,26 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
           }),
         );
     }
-    res.json({ candidates: ranked, searchId: crypto.randomUUID(), scoringVersion: 1 });
+    res.json({
+      candidates: ranked,
+      needsArea: user.latitude == null || user.longitude == null,
+      searchId: crypto.randomUUID(),
+      scoringVersion: 1,
+    });
   });
 
+  router.post("/vitals", (req, res) => {
+    const metric = z
+      .object({
+        id: z.string().max(80),
+        name: z.enum(["LCP", "INP", "CLS"]),
+        value: z.number().nonnegative(),
+        frame: z.enum(["phone", "tablet", "desktop"]),
+      })
+      .parse(req.body);
+    console.info(JSON.stringify({ event: "dashboard_vital", ...metric }));
+    res.sendStatus(204);
+  });
   router.post("/impressions", async (req, res) => {
     const user = await self(clerkId(req));
     const input = z
@@ -130,12 +147,23 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       },
     });
     if (blocked) throw new ApiError(404, "Photo unavailable.");
+    const began = performance.now();
     const { bytes } = await storage.download(other.primaryPhotoUrl, other.clerkId);
+    const downloaded = performance.now();
     const thumbnail = await sharp(bytes)
       .rotate()
       .resize(320, 320, { fit: "cover" })
       .webp({ quality: 65 })
       .toBuffer();
+    console.info(
+      JSON.stringify({
+        event: "candidate_thumbnail",
+        downloadMs: Math.round(downloaded - began),
+        transformMs: Math.round(performance.now() - downloaded),
+        sourceBytes: bytes.length,
+        thumbnailBytes: thumbnail.length,
+      }),
+    );
     res.set("Cache-Control", "private, max-age=60").type("image/webp").send(thumbnail);
   });
 

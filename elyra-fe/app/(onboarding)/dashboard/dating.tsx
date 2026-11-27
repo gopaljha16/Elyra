@@ -59,6 +59,7 @@ type Candidate = {
   location: string;
   interests: string[];
   activities: string[];
+  position: number;
 };
 type Plan = {
   activity: string | null;
@@ -220,7 +221,19 @@ export function Dating({
     setSearchState("loading");
     try {
       const data = await request("/candidates");
-      setCandidates(data.candidates);
+      if (data.needsArea) {
+        setTab("preferences");
+        setSearchState("idle");
+        setCandidates([]);
+        setNotice({ tone: "error", text: "Choose Use my approximate area before searching." });
+        return;
+      }
+      setCandidates(
+        data.candidates.map((person: Candidate, index: number) => ({
+          ...person,
+          position: index + 1,
+        })),
+      );
       setSearchId(data.searchId ?? "");
       setSearchState("done");
     } catch (error) {
@@ -536,11 +549,11 @@ export function Dating({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {candidates.map((person, index) => (
+              {candidates.map((person) => (
                 <article
                   key={person.id}
                   data-candidate={person.id}
-                  data-position={index + 1}
+                  data-position={person.position}
                   className="flex flex-col justify-between gap-4 rounded-2xl border border-border bg-background/60 p-5 shadow-xs transition-shadow hover:shadow-md"
                 >
                   <div className="flex items-start gap-4">
@@ -925,10 +938,10 @@ export function Dating({
                 )}
                 {picked && (
                   <div className="grid gap-2">
-                    {picked.balanced && (
+                    {picked.walkingMinutes != null && (
                       <p className="text-sm">
-                        Compared using walking times from both areas. Walking routes may lack
-                        sidewalks or pedestrian paths.
+                        {picked.balanced && "Compared using walking times from both areas. "}Walking
+                        routes may lack sidewalks or pedestrian paths.
                       </p>
                     )}
                     <a
