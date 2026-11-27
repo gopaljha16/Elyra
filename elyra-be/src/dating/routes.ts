@@ -163,6 +163,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
+    console.info(JSON.stringify({ event: "discovery_results", count: ranked.length }));
     res.json({ candidates: ranked });
   });
 
@@ -506,16 +507,24 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const plan = match.datePlan;
     if (plan?.status !== "CONFIRMED" || !plan.scheduledAt || +plan.scheduledAt > Date.now())
       throw new ApiError(409, "Feedback opens after a confirmed date.");
-    const input = z
-      .object({
-        attended: z.boolean(),
-        rating: z.number().int().min(1).max(5),
-        comfort: z.number().int().min(1).max(5),
-        enjoyment: z.number().int().min(1).max(5),
-        wouldMeetAgain: z.boolean(),
-        review: z.string().trim().max(500).optional(),
-      })
+    const version = z
+      .object({ version: z.number().int().optional(), formVersion: z.literal(2).optional() })
       .parse(req.body);
+    if (version.version !== undefined && version.version !== plan.proposalVersion)
+      throw new ApiError(409, "This date changed. Refresh your matches.");
+    const input =
+      req.body.attended === false
+        ? { attended: false, rating: null, comfort: null, enjoyment: null, wouldMeetAgain: null }
+        : z
+            .object({
+              attended: z.literal(true),
+              rating: z.number().int().min(1).max(5),
+              comfort: z.number().int().min(1).max(5),
+              enjoyment: z.number().int().min(1).max(5),
+              wouldMeetAgain: z.boolean(),
+              review: z.string().trim().max(500).optional(),
+            })
+            .parse(req.body);
     await db.feedback.upsert({
       where: {
         matchId_userId_planVersion: {
@@ -524,8 +533,14 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
           planVersion: plan.proposalVersion,
         },
       },
-      create: { matchId: match.id, userId: user.id, planVersion: plan.proposalVersion, ...input },
-      update: input,
+      create: {
+        matchId: match.id,
+        userId: user.id,
+        planVersion: plan.proposalVersion,
+        ...input,
+        formVersion: version.formVersion ?? 1,
+      },
+      update: { ...input, formVersion: version.formVersion ?? 1 },
     });
     res.json({ submitted: true });
   });
@@ -549,12 +564,18 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
         userId: user.id,
         planVersion: plan.proposalVersion,
         attended: false,
-        rating: 1,
-        comfort: 1,
-        enjoyment: 1,
-        wouldMeetAgain: false,
+        rating: null,
+        comfort: null,
+        enjoyment: null,
+        wouldMeetAgain: null,
       },
-      update: { attended: false, rating: 1, comfort: 1, enjoyment: 1, wouldMeetAgain: false },
+      update: {
+        attended: false,
+        rating: null,
+        comfort: null,
+        enjoyment: null,
+        wouldMeetAgain: null,
+      },
     });
     res.json({ submitted: true });
   });

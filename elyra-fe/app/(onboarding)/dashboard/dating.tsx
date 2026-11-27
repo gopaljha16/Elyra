@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import { DateFeedback } from "./date-feedback";
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -136,6 +137,9 @@ export function Dating({
   const [activities, setActivities] = useState(initialActivities);
   const [location, setLocation] = useState(initialLocation);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [tab, setTab] = useState("preferences");
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [matches, setMatches] = useState<Match[]>([]);
   const [activity, setActivity] = useState("Coffee");
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -147,19 +151,6 @@ export function Dating({
   const [blockTarget, setBlockTarget] = useState<{ id: string; name: string } | null>(null);
   const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
   const [reportReason, setReportReason] = useState("");
-  const [feedback, setFeedback] = useState<
-    Record<
-      string,
-      {
-        attended: boolean;
-        rating: number;
-        comfort: number;
-        enjoyment: number;
-        wouldMeetAgain: boolean;
-      }
-    >
-  >({});
-
   const request = useCallback(
     async (path: string, method = "GET", body?: unknown) => {
       const token = await getToken();
@@ -184,8 +175,8 @@ export function Dating({
   const refresh = useCallback(async () => {
     const data = await request("/matches");
     setMatches(data.matches);
-    if (activities.length && location) setCandidates((await request("/candidates")).candidates);
-  }, [request, activities.length, location]);
+    setRefreshFailed(false);
+  }, [request]);
 
   useEffect(() => {
     void request("/matches")
@@ -193,17 +184,33 @@ export function Dating({
       .catch((error) => setNotice({ text: message(error), tone: "error" }));
   }, [request]);
 
-  async function act(operation: () => Promise<void>, successMessage?: string) {
+  async function act(
+    operation: () => Promise<void>,
+    successMessage?: string,
+    updateMatches = true,
+  ) {
     setBusy(true);
     setNotice(null);
     try {
       await operation();
-      await refresh();
+      if (updateMatches) await refresh().catch(() => setRefreshFailed(true));
       if (successMessage) setNotice({ text: successMessage, tone: "success" });
     } catch (error) {
       setNotice({ text: message(error), tone: "error" });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function search() {
+    setTab("discover");
+    setSearchState("loading");
+    try {
+      setCandidates((await request("/candidates")).candidates);
+      setSearchState("done");
+    } catch (error) {
+      setSearchState("error");
+      throw error;
     }
   }
 
@@ -214,14 +221,19 @@ export function Dating({
     }
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        void act(async () => {
-          await request("/area", "PUT", {
-            location,
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          });
-          setCandidates((await request("/candidates")).candidates);
-        }, "Your area has been updated.");
+        void act(
+          async () => {
+            await request("/area", "PUT", {
+              location,
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            });
+            setSearchState("idle");
+            setCandidates([]);
+          },
+          "Your area has been updated. Choose Find matches to search.",
+          false,
+        );
       },
       () =>
         setNotice({
@@ -257,7 +269,16 @@ export function Dating({
         </Alert>
       )}
 
-      <Tabs defaultValue={candidates.length > 0 ? "discover" : "preferences"}>
+      {refreshFailed && (
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => void act(refresh, undefined, false)}
+        >
+          Reload matches
+        </Button>
+      )}
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="preferences">
             <Compass className="size-4" />
@@ -332,18 +353,24 @@ export function Dating({
                   size="sm"
                   disabled={busy || !activities.length}
                   onClick={() =>
-                    void act(async () => {
-                      const token = await getToken();
-                      const response = await fetch(`${endpoint}/api/onboarding/date-activities`, {
-                        method: "PUT",
-                        headers: {
-                          Authorization: `Bearer ${token}`,
-                          "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ activities }),
-                      });
-                      if (!response.ok) throw new Error("Couldn’t save date activities.");
-                    }, "Date activities saved.")
+                    void act(
+                      async () => {
+                        const token = await getToken();
+                        const response = await fetch(`${endpoint}/api/onboarding/date-activities`, {
+                          method: "PUT",
+                          headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({ activities }),
+                        });
+                        if (!response.ok) throw new Error("Couldn’t save date activities.");
+                        setCandidates([]);
+                        setSearchState("idle");
+                      },
+                      "Date activities saved.",
+                      false,
+                    )
                   }
                 >
                   Save activities
@@ -372,11 +399,7 @@ export function Dating({
                 </Button>
                 <Button
                   disabled={busy || !location || !activities.length}
-                  onClick={() =>
-                    void act(async () => {
-                      setCandidates((await request("/candidates")).candidates);
-                    })
-                  }
+                  onClick={() => void act(search, undefined, false)}
                 >
                   <Search className="size-4" />
                   <span>Find matches</span>
@@ -398,22 +421,32 @@ export function Dating({
               variant="outline"
               size="sm"
               disabled={busy || !location || !activities.length}
-              onClick={() =>
-                void act(async () => {
-                  setCandidates((await request("/candidates")).candidates);
-                })
-              }
+              onClick={() => void act(search, undefined, false)}
             >
               <Search className="size-4" />
               <span>Refresh</span>
             </Button>
           </div>
 
-          {candidates.length === 0 ? (
+          {searchState !== "done" || candidates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-background/40 p-8 text-center space-y-2">
-              <p className="font-serif text-xl text-foreground">No candidates loaded yet</p>
+              <p className="font-serif text-xl text-foreground">
+                {searchState === "loading"
+                  ? "Searching nearby..."
+                  : searchState === "error"
+                    ? "Search interrupted"
+                    : searchState === "done"
+                      ? "No more people to show"
+                      : "Ready to discover?"}
+              </p>
               <p className="text-sm text-muted-foreground">
-                Set your activities and city in Preferences, then click Find matches.
+                {searchState === "done"
+                  ? "Check back as more people join your area."
+                  : searchState === "error"
+                    ? "Choose Refresh to try again."
+                    : searchState === "idle"
+                      ? "Set your activities and area, then choose Find matches."
+                      : "Checking your mutual preferences."}
               </p>
             </div>
           ) : (
@@ -633,124 +666,19 @@ export function Dating({
                     match.plan.scheduledAt &&
                     new Date(match.plan.scheduledAt) <= new Date() &&
                     !match.feedbackSubmitted && (
-                      <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-                        <h4 className="font-serif text-lg font-medium text-foreground">
-                          How was your date?
-                        </h4>
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-[#842b50] rounded"
-                            checked={feedback[match.id]?.attended ?? false}
-                            onChange={(event) =>
-                              setFeedback((previous) => ({
-                                ...previous,
-                                [match.id]: {
-                                  ...previous[match.id],
-                                  attended: event.target.checked,
-                                  rating: previous[match.id]?.rating ?? 3,
-                                  comfort: previous[match.id]?.comfort ?? 3,
-                                  enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false,
-                                },
-                              }))
-                            }
-                          />
-                          <span>We met in person</span>
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          {(["rating", "comfort", "enjoyment"] as const).map((field) => (
-                            <div className="grid gap-1.5" key={field}>
-                              <Label htmlFor={`${match.id}-${field}`}>
-                                {field === "rating"
-                                  ? "Overall"
-                                  : field === "comfort"
-                                    ? "Comfort"
-                                    : "Enjoyment"}{" "}
-                                (1–5)
-                              </Label>
-                              <Select
-                                value={String(feedback[match.id]?.[field] ?? 3)}
-                                onValueChange={(value) =>
-                                  setFeedback((previous) => ({
-                                    ...previous,
-                                    [match.id]: {
-                                      attended: previous[match.id]?.attended ?? false,
-                                      wouldMeetAgain: previous[match.id]?.wouldMeetAgain ?? false,
-                                      rating: previous[match.id]?.rating ?? 3,
-                                      comfort: previous[match.id]?.comfort ?? 3,
-                                      enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                      [field]: Number(value),
-                                    },
-                                  }))
-                                }
-                              >
-                                <SelectTrigger id={`${match.id}-${field}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {[1, 2, 3, 4, 5].map((value) => (
-                                    <SelectItem key={value} value={String(value)}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ))}
-                        </div>
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-[#842b50] rounded"
-                            checked={feedback[match.id]?.wouldMeetAgain ?? false}
-                            onChange={(event) =>
-                              setFeedback((previous) => ({
-                                ...previous,
-                                [match.id]: {
-                                  attended: previous[match.id]?.attended ?? false,
-                                  rating: previous[match.id]?.rating ?? 3,
-                                  comfort: previous[match.id]?.comfort ?? 3,
-                                  enjoyment: previous[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: event.target.checked,
-                                },
-                              }))
-                            }
-                          />
-                          <span>I would meet again</span>
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await request(`/matches/${match.id}/feedback`, "POST", {
-                                  attended: feedback[match.id]?.attended ?? false,
-                                  rating: feedback[match.id]?.rating ?? 3,
-                                  comfort: feedback[match.id]?.comfort ?? 3,
-                                  enjoyment: feedback[match.id]?.enjoyment ?? 3,
-                                  wouldMeetAgain: feedback[match.id]?.wouldMeetAgain ?? false,
-                                });
-                              }, "Your feedback was saved privately.")
-                            }
-                          >
-                            Save private feedback
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                await request(`/matches/${match.id}/no-show`, "POST");
-                              }, "Your no-show report was saved privately.")
-                            }
-                          >
-                            We didn’t meet
-                          </Button>
-                        </div>
-                      </div>
+                      <DateFeedback
+                        key={match.plan.proposalVersion}
+                        busy={busy}
+                        onSubmit={(answers) =>
+                          void act(async () => {
+                            await request(`/matches/${match.id}/feedback`, "POST", {
+                              ...answers,
+                              formVersion: 2,
+                              version: match.plan?.proposalVersion,
+                            });
+                          }, "Your feedback was saved privately.")
+                        }
+                      />
                     )}
 
                   {match.feedbackSubmitted && (
