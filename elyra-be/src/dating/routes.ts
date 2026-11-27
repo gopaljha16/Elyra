@@ -1,3 +1,4 @@
+import { walkingOptions, middleLongitude } from "./travel.js";
 import { discover, fits, shared, compatibility } from "./discovery.js";
 import { Router } from "express";
 import { z } from "zod";
@@ -49,6 +50,22 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       .parse(req.body);
     await db.user.update({ where: { id: user.id }, data: area });
     res.json({ saved: true });
+  });
+
+  router.put("/walking-area", async (req, res) => {
+    const user = await self(clerkId(req));
+    const point = z
+      .object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) })
+      .nullable()
+      .parse(req.body.point);
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        walkingLatitude: point ? Math.round(point.latitude * 100) / 100 : null,
+        walkingLongitude: point ? Math.round(point.longitude * 100) / 100 : null,
+      },
+    });
+    res.json({ walkingEnabled: !!point });
   });
 
   router.get("/candidates", async (req, res) => {
@@ -201,6 +218,10 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       orderBy: { updatedAt: "desc" },
     });
     res.json({
+      walkingEnabled: user.walkingLatitude != null && user.walkingLongitude != null,
+      walkingPilot:
+        !!process.env.GOOGLE_ROUTES_API_KEY &&
+        user.location.trim().toLowerCase() === process.env.DATING_PILOT_AREA?.trim().toLowerCase(),
       matches: matches.map((match) => {
         const other = match.user1Id === user.id ? match.user2 : match.user1;
         const feedback = match.feedbacks.filter(
@@ -316,8 +337,29 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     )
       throw new ApiError(409, "Both people need to set an area.");
     const latitude = (user.latitude + other.latitude) / 2;
-    const longitude = (user.longitude + other.longitude) / 2;
-    res.json({ venues: await nearbyVenues(placesKey, activity, latitude, longitude) });
+    const longitude = middleLongitude(user.longitude, other.longitude);
+    const venues = await nearbyVenues(placesKey, activity, latitude, longitude);
+    const key = process.env.GOOGLE_ROUTES_API_KEY;
+    const pilot = process.env.DATING_PILOT_AREA?.trim().toLowerCase();
+    if (
+      key &&
+      user.location.trim().toLowerCase() === pilot &&
+      user.walkingLatitude != null &&
+      user.walkingLongitude != null &&
+      other.walkingLatitude != null &&
+      other.walkingLongitude != null
+    ) {
+      const ranked = await walkingOptions(
+        venues,
+        [
+          { latitude: user.walkingLatitude, longitude: user.walkingLongitude },
+          { latitude: other.walkingLatitude, longitude: other.walkingLongitude },
+        ],
+        key,
+      );
+      return res.json({ venues: ranked });
+    }
+    res.json({ venues });
   });
 
   router.post("/matches/:id/plan", async (req, res) => {
@@ -327,6 +369,8 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       .object({
         activity: z.enum(dateActivities),
         venueId: z.string().min(1),
+        expectedVersion: z.number().int().min(0).nullable().optional(),
+        meetingLabel: z.string().trim().min(1).max(80).optional(),
         scheduledAt: z.iso.datetime(),
       })
       .parse(req.body);
@@ -346,7 +390,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       placesKey,
       input.activity,
       (user.latitude + other.latitude) / 2,
-      (user.longitude + other.longitude) / 2,
+      middleLongitude(user.longitude, other.longitude),
     );
     const venue = venues.find((place) => place.id === input.venueId);
     if (!venue) throw new ApiError(400, "Choose an available venue.");
@@ -354,7 +398,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
       activity: input.activity,
       venueId: venue.id,
       scheduledAt,
-      location: venue.name,
+      location: input.meetingLabel ?? "Selected venue",
       activities: [input.activity],
       status: "PROPOSED",
       proposedById: user.id,
@@ -364,6 +408,11 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     const plan = await db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
       const current = await tx.datePlan.findUnique({ where: { matchId: match.id } });
+      if (
+        input.expectedVersion !== undefined &&
+        input.expectedVersion !== (current?.proposalVersion ?? null)
+      )
+        throw new ApiError(409, "The proposal has changed. Refresh your matches.");
       if (current?.status === "CONFIRMED") {
         if (current.scheduledAt && +current.scheduledAt > Date.now())
           throw new ApiError(409, "Cancel the confirmed plan before proposing another.");
@@ -397,7 +446,7 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
     if (!plan || plan.status !== "PROPOSED" || plan.proposalVersion !== version)
       throw new ApiError(409, "This proposal changed. Refresh and review it.");
     const updated = await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${plan.id}, 0))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${match.id}, 0))`;
       const current = await tx.datePlan.findUniqueOrThrow({ where: { id: plan.id } });
       if (current.status !== "PROPOSED" || current.proposalVersion !== version)
         throw new ApiError(409, "This proposal changed. Refresh and review it.");

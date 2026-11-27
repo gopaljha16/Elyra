@@ -23,6 +23,8 @@ model User {
   location           String
   latitude           Float?
   longitude          Float?
+  walkingLatitude Float?
+  walkingLongitude Float?
 
   // Profile photos (array of URLs from Supabase Storage)
   profilePhotos      String[]           @default([])

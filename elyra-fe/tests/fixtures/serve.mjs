@@ -8,6 +8,7 @@ const built = await Bun.build({
   target: "browser",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    "process.env.NEXT_PUBLIC_MAPS_EMBED_KEY": JSON.stringify(""),
     "process.env.NEXT_PUBLIC_API_URL": JSON.stringify(""),
   },
   plugins: [

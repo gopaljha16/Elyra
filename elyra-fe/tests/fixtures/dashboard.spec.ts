@@ -73,9 +73,13 @@ for (const width of [375, 768, 1440])
     await a.reload();
     await a.getByRole("tab", { name: /Matches/ }).press("Enter");
     await a.getByRole("button", { name: "Propose a date" }).press("Enter");
-    await a.getByRole("combobox", { name: "Venue", exact: true }).press("Enter");
+    const venue = a.getByRole("combobox", { name: "Venue", exact: true });
+    await expect(venue).toBeEnabled();
+    await venue.press("Enter");
     await a.getByRole("option", { name: /Cafe/ }).press("Enter");
-    await a.getByLabel("Date and time").fill("2030-05-10T15:00");
+    await a
+      .getByLabel("Date and time")
+      .fill(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
     await a.getByRole("button", { name: "Propose this date" }).press("Enter");
     await expect(a.getByText("Date proposal sent.")).toBeVisible();
     await b.reload();
@@ -86,3 +90,46 @@ for (const width of [375, 768, 1440])
     await a.close();
     await b.close();
   });
+
+test("feedback records an explicit missed date without ratings", async ({ page }) => {
+  let saved: unknown;
+  await page.route("**/api/dating/**", (route) => {
+    if (route.request().url().endsWith("/feedback")) {
+      saved = route.request().postDataJSON();
+      return route.fulfill({ json: { submitted: true } });
+    }
+    return route.fulfill({
+      json: {
+        matches: [
+          {
+            id: "past",
+            status: "ACTIVE",
+            person: { id: "a", name: "Ali", age: 27 },
+            acceptedByMe: true,
+            activities: ["Coffee"],
+            plan: {
+              status: "CONFIRMED",
+              activity: "Coffee",
+              location: "Cafe",
+              venueId: "cafe",
+              scheduledAt: "2020-05-01T00:00:00Z",
+              proposalVersion: 2,
+            },
+            feedbackSubmitted: !!saved,
+          },
+        ],
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("tab", { name: /Matches/ }).click();
+  const submit = page.getByRole("button", { name: "Save private feedback" });
+  await expect(submit).toBeDisabled();
+  await page.getByLabel("Did you meet in person?").selectOption("yes");
+  await submit.click();
+  expect(saved).toBeUndefined();
+  await page.getByLabel("Did you meet in person?").selectOption("no");
+  await expect(page.getByLabel("Comfort")).toHaveCount(0);
+  await submit.click();
+  await expect.poll(() => saved).toEqual({ attended: false, formVersion: 2, version: 2 });
+});

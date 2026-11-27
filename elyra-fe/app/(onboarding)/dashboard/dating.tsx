@@ -80,7 +80,14 @@ type Match = {
   feedbackSubmitted: boolean;
   bothWantAgain: boolean;
 };
-type Venue = { id: string; name: string; address: string };
+type Venue = {
+  id: string;
+  name: string;
+  address: string;
+  attributions?: { provider?: string; providerUri?: string }[];
+  walkingMinutes?: number | null;
+  balanced?: boolean;
+};
 const options = ["Coffee", "Bowling", "Arcade", "Museum", "Mall", "Walk"];
 
 function PersonPhoto({ id, name }: { id: string; name: string }) {
@@ -146,6 +153,10 @@ export function Dating({
   const [activity, setActivity] = useState("Coffee");
   const [venues, setVenues] = useState<Venue[]>([]);
   const [venueId, setVenueId] = useState("");
+  const [walkingEnabled, setWalkingEnabled] = useState(false);
+  const [walkingPilot, setWalkingPilot] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [meetingLabel, setMeetingLabel] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [notice, setNotice] = useState<{ text: string; tone: "error" | "success" } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -177,14 +188,14 @@ export function Dating({
   const refresh = useCallback(async () => {
     const data = await request("/matches");
     setMatches(data.matches);
+    setWalkingEnabled(Boolean(data.walkingEnabled));
+    setWalkingPilot(Boolean(data.walkingPilot));
     setRefreshFailed(false);
   }, [request]);
 
   useEffect(() => {
-    void request("/matches")
-      .then((data) => setMatches(data.matches))
-      .catch((error) => setNotice({ text: message(error), tone: "error" }));
-  }, [request]);
+    void refresh().catch((error) => setNotice({ text: message(error), tone: "error" }));
+  }, [refresh]);
 
   async function act(
     operation: () => Promise<void>,
@@ -272,13 +283,39 @@ export function Dating({
     );
   }
 
-  async function loadVenues(match: Match) {
+  async function walkingArea() {
+    let point = null;
+    if (!walkingEnabled) {
+      if (!navigator.geolocation) throw new Error("Location is unavailable in this browser.");
+      const position = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          () => reject(new Error("Allow location access to set a walking departure area.")),
+          { timeout: 10000 },
+        ),
+      );
+      point = {
+        latitude: Math.round(position.coords.latitude * 100) / 100,
+        longitude: Math.round(position.coords.longitude * 100) / 100,
+      };
+    }
+    const result = await request("/walking-area", "PUT", { point });
+    setWalkingEnabled(result.walkingEnabled);
+  }
+
+  async function loadVenues(match: Match, chosen?: string) {
+    setMapOpen(false);
+    if (selected !== match.id) {
+      setScheduledAt("");
+      setMeetingLabel("");
+    }
+
     setSelected(match.id);
     setVenues([]);
     setVenueId("");
-    const nextActivity = match.activities.includes(activity)
-      ? activity
-      : (match.activities[0] ?? "Coffee");
+    const nextActivity =
+      chosen ??
+      (match.activities.includes(activity) ? activity : (match.activities[0] ?? "Coffee"));
     setActivity(nextActivity);
     const data = await request(
       `/matches/${match.id}/venues?activity=${encodeURIComponent(nextActivity)}`,
@@ -288,6 +325,8 @@ export function Dating({
 
   const current = matches.find((match) => match.id === selected);
 
+  const picked = venues.find((v) => v.id === venueId);
+  const embedKey = process.env.NEXT_PUBLIC_MAPS_EMBED_KEY;
   return (
     <section className="dating-dashboard mt-6 space-y-6">
       {notice && (
@@ -408,6 +447,24 @@ export function Dating({
 
             <div className="space-y-3 pt-4 border-t border-border/70">
               <div className="grid gap-1.5">
+                {(walkingPilot || walkingEnabled) && (
+                  <div className="space-y-2 pb-3">
+                    <p className="text-sm">
+                      For walking estimates, set your departure area while you are there. If both
+                      people opt in, Google Maps receives the rounded areas. Only your own travel
+                      time is shown to you.
+                    </p>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => void act(walkingArea, undefined, false)}
+                    >
+                      {walkingEnabled
+                        ? "Remove my walking area"
+                        : "Use this area for walking estimates"}
+                    </Button>
+                  </div>
+                )}
                 <Label htmlFor="area">City</Label>
                 <Input
                   id="area"
@@ -652,7 +709,7 @@ export function Dating({
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        {match.plan.status === "CONFIRMED" && (
+                        {match.plan.venueId && match.plan.status !== "CANCELLED" && (
                           <Button variant="outline" size="sm" asChild>
                             <a
                               target="_blank"
@@ -660,7 +717,7 @@ export function Dating({
                               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(match.plan.location)}&query_place_id=${encodeURIComponent(match.plan.venueId ?? "")}`}
                             >
                               <MapPin className="size-3.5" />
-                              <span>Directions</span>
+                              <span>View venue</span>
                             </a>
                           </Button>
                         )}
@@ -778,16 +835,10 @@ export function Dating({
                 <Label htmlFor="plan-activity">Activity</Label>
                 <Select
                   value={activity}
-                  onValueChange={(value) => {
-                    setActivity(value);
-                    void act(async () => {
-                      const data = await request(
-                        `/matches/${current.id}/venues?activity=${encodeURIComponent(value)}`,
-                      );
-                      setVenues(data.venues);
-                      setVenueId("");
-                    });
-                  }}
+                  disabled={busy}
+                  onValueChange={(value) =>
+                    void act(() => loadVenues(current, value), undefined, false)
+                  }
                 >
                   <SelectTrigger id="plan-activity">
                     <SelectValue />
@@ -804,14 +855,22 @@ export function Dating({
 
               <div className="grid gap-1.5">
                 <Label htmlFor="venue">Venue</Label>
-                <Select value={venueId} onValueChange={setVenueId}>
+                <Select
+                  disabled={busy || !venues.length}
+                  value={venueId}
+                  onValueChange={setVenueId}
+                >
                   <SelectTrigger id="venue">
                     <SelectValue placeholder="Choose a venue" />
                   </SelectTrigger>
                   <SelectContent>
                     {venues.map((venue) => (
                       <SelectItem key={venue.id} value={venue.id}>
-                        {venue.name} — {venue.address}
+                        {venue.name}
+                        {venue.walkingMinutes != null
+                          ? ` (about ${venue.walkingMinutes} min walk for you)`
+                          : ""}{" "}
+                        — {venue.address}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -819,6 +878,90 @@ export function Dating({
               </div>
 
               <div className="grid gap-1.5">
+                {notice?.tone === "error" && <p role="alert">{notice.text}</p>}
+                {!venues.length && (
+                  <div role="status">
+                    {busy
+                      ? "Finding public venues..."
+                      : notice?.tone === "error"
+                        ? "Venue search interrupted."
+                        : "No venues found for this activity."}{" "}
+                    {!busy && (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          void act(() => loadVenues(current, activity), undefined, false)
+                        }
+                      >
+                        Retry venue search
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {!!venues.length && (
+                  <div className="text-xs">
+                    Google Maps
+                    {Array.from(
+                      new Map(
+                        venues
+                          .flatMap((v) => v.attributions ?? [])
+                          .filter((a) => a.provider)
+                          .map((a) => [a.provider, a]),
+                      ).values(),
+                    ).map((a) => (
+                      <span key={a.provider}>
+                        {" "}
+                        /{" "}
+                        {a.providerUri?.startsWith("https://") ? (
+                          <a href={a.providerUri} target="_blank" rel="noreferrer">
+                            {a.provider}
+                          </a>
+                        ) : (
+                          a.provider
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {picked && (
+                  <div className="grid gap-2">
+                    {picked.balanced && (
+                      <p className="text-sm">
+                        Compared using walking times from both areas. Walking routes may lack
+                        sidewalks or pedestrian paths.
+                      </p>
+                    )}
+                    <a
+                      className="underline text-primary"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(picked.name)}&query_place_id=${encodeURIComponent(picked.id)}`}
+                    >
+                      View venue on Google Maps
+                    </a>
+                    {embedKey && (
+                      <Button variant="outline" onClick={() => setMapOpen(!mapOpen)}>
+                        {mapOpen ? "Hide map" : "Show map"}
+                      </Button>
+                    )}
+                    {mapOpen && embedKey && (
+                      <iframe
+                        title="Selected public venue"
+                        className="h-48 w-full rounded-xl"
+                        referrerPolicy="strict-origin-when-cross-origin"
+                        src={`https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(embedKey)}&q=place_id:${encodeURIComponent(picked.id)}`}
+                      />
+                    )}
+                    <Label htmlFor="meeting-label">Meeting point (optional)</Label>
+                    <Input
+                      id="meeting-label"
+                      value={meetingLabel}
+                      maxLength={80}
+                      placeholder="For example, by the main entrance"
+                      onChange={(e) => setMeetingLabel(e.target.value)}
+                    />
+                  </div>
+                )}
                 <Label htmlFor="date-time">Date and time</Label>
                 <Input
                   id="date-time"
@@ -841,6 +984,8 @@ export function Dating({
                   await request(`/matches/${current.id}/plan`, "POST", {
                     activity,
                     venueId,
+                    meetingLabel: meetingLabel.trim() || undefined,
+                    expectedVersion: current.plan?.proposalVersion ?? null,
                     scheduledAt: new Date(scheduledAt).toISOString(),
                   });
                   setSelected(null);
