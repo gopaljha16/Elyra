@@ -288,7 +288,13 @@ export function datingRoutes(db: PrismaClient, placesKey = "", storage?: Storage
           acceptedByThem: match.user1Id === user.id ? match.acceptedByUser2 : match.acceptedByUser1,
           person: { id: other.id, name: other.name, age: other.age },
           activities: shared(user, other).activities,
-          plan: match.datePlan,
+          plan: match.datePlan && {
+            ...match.datePlan,
+            acceptedByMe:
+              match.user1Id === user.id
+                ? match.datePlan.acceptedByUser1
+                : match.datePlan.acceptedByUser2,
+          },
           feedbackSubmitted: feedback.some((entry) => entry.userId === user.id),
           bothWantAgain:
             feedback.length === 2 &&

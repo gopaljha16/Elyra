@@ -67,6 +67,7 @@ type Plan = {
   scheduledAt: string | null;
   status: string;
   proposalVersion: number;
+  acceptedByMe: boolean;
 } | null;
 type Match = {
   id: string;
@@ -261,7 +262,7 @@ export function Dating({
   const current = matches.find((match) => match.id === selected);
 
   return (
-    <section className="mt-6 space-y-6">
+    <section className="dating-dashboard mt-6 space-y-6">
       {notice && (
         <Alert variant={notice.tone === "success" ? "success" : "destructive"}>
           <AlertCircle className="size-4 shrink-0 mt-0.5" />
@@ -580,17 +581,22 @@ export function Dating({
                           Decline
                         </Button>
                       )}
-                      {match.status === "ACTIVE" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy || !match.activities.length}
-                          onClick={() => void act(() => loadVenues(match))}
-                        >
-                          <Calendar className="size-4" />
-                          <span>Plan a date</span>
-                        </Button>
-                      )}
+                      {match.status === "ACTIVE" &&
+                        (match.plan?.status !== "CONFIRMED" || match.bothWantAgain) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy || !match.activities.length}
+                            onClick={() => void act(() => loadVenues(match), undefined, false)}
+                          >
+                            <Calendar className="size-4" />
+                            <span>
+                              {match.plan?.status === "PROPOSED"
+                                ? "Suggest another plan"
+                                : "Propose a date"}
+                            </span>
+                          </Button>
+                        )}
                     </div>
                   </div>
 
@@ -604,7 +610,14 @@ export function Dating({
                           {match.plan.scheduledAt
                             ? new Date(match.plan.scheduledAt).toLocaleString()
                             : "Time pending"}{" "}
-                          · Status: {match.plan.status}
+                          ·{" "}
+                          {match.plan.status === "PROPOSED"
+                            ? match.plan.acceptedByMe
+                              ? "Waiting for their answer"
+                              : "Review your invitation"
+                            : match.plan.status === "CONFIRMED"
+                              ? "Date confirmed"
+                              : "Plan cancelled"}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -620,7 +633,7 @@ export function Dating({
                             </a>
                           </Button>
                         )}
-                        {match.plan.status === "PROPOSED" && (
+                        {match.plan.status === "PROPOSED" && !match.plan.acceptedByMe && (
                           <Button
                             size="sm"
                             disabled={busy}
@@ -721,7 +734,7 @@ export function Dating({
 
       {/* Plan a date Dialog */}
       <Dialog open={Boolean(current)} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Choose a place</DialogTitle>
             <DialogDescription>

@@ -63,3 +63,39 @@
     radial-gradient(ellipse at 12% 8%, rgba(244, 207, 201, 0.7), transparent 48%),
     radial-gradient(ellipse at 94% 28%, rgba(235, 219, 230, 0.75), transparent 46%), #faf1eb;
 }
+
+.dating-dashboard select {
+  min-height: 2.5rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background-color: var(--card);
+}
+@media (max-width: 480px) {
+  .dating-dashboard [data-slot="tabs-trigger"] {
+    padding-inline: 0.5rem;
+  }
+  .dating-dashboard [data-slot="tabs-trigger"] svg {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dating-dashboard article {
+    animation: dating-arrive 160ms ease-out;
+  }
+  @keyframes dating-arrive {
+    from {
+      opacity: 0.45;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dating-dashboard *,
+  [data-slot="dialog-content"] {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}
